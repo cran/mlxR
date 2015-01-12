@@ -1,0 +1,31 @@
+Package: mlxR
+Type: Package
+Version: 2.1.0
+Title: Simulation of Longitudinal Data
+Description: Simulation and visualization of complex
+    models for longitudinal data. The models are encoded using the model coding
+    language Mlxtran, automatically converted into C++ codes, compiled on the
+    fly and linked to R using the Rcpp package. That allows one to implement
+    very easily complex ODE-based models and complex statistical models,
+    including mixed effects models, for continuous, count, categorical, and
+    time-to-event data.
+Authors@R: c(
+    person( "Marc", "Lavielle", role = c("aut","cre"), email = "Marc.Lavielle@inria.fr" ), 
+    person( "Romain", "Francois", role = "aut", email = "romain@r-enthusiasts.com"), 
+    person( "Fazia", "Bellal", role = "ctb" )
+    )
+URL: http://simulx.webpopix.org
+BugReports: https://github.com/MarcLavielle/mlxR/issues
+Depends: R (>= 3.0.3), ggplot2
+Suggests: reshape2, gridExtra
+Imports: XML, Rcpp (>= 0.11.3), tools
+License: BSD_2_clause + file LICENSE
+Copyright: Inria
+Packaged: 2015-01-12 14:10:36 UTC; romain
+Author: Marc Lavielle [aut, cre],
+  Romain Francois [aut],
+  Fazia Bellal [ctb]
+Maintainer: Marc Lavielle <Marc.Lavielle@inria.fr>
+NeedsCompilation: no
+Repository: CRAN
+Date/Publication: 2015-01-12 23:27:59
