@@ -1,5 +1,5 @@
 
-convertmlx <- function(data, dataIn){
+convertmlx <- function(data, dataIn,iop.group,id.out=FALSE,id.ori=NULL){
   
   g <- dataIn$group
   iop.gout <- 0
@@ -14,16 +14,17 @@ convertmlx <- function(data, dataIn){
   if (length(unique(var$id))==1)
     var$id <- NULL
   
-  iop.group <- 0
+  #   iop.group <- 0
   if (length(g)>1){
     gr=numeric(0)
     for(k in seq(1,length(g))){
       pgk <- prod(g[[k]]$size)
       gr=c(gr,rep(k,pgk))
-      if(max(pgk)>1)
-        iop.group=1
     }
+  }else{
+    iop.group <- 0
   }  
+  
   
   gr=numeric(0)
   for(k in seq(1,length(g))){
@@ -94,6 +95,19 @@ convertmlx <- function(data, dataIn){
       }
     }
     names(dk)[names(dk)=="value"] <- ak$name
+    
+    if (id.out==TRUE){
+      if (is.null(dk$id)){
+        dk$id <- 1
+        nk <- length(dk)
+        dk <- dk[,c(nk,(1:(nk-1)))]
+      }
+      if (is.null(dk$group)){
+        dk$group <- 1
+        nk <- length(dk)
+        dk <- dk[,c(1,nk,(2:(nk-1)))]
+      }
+    }
     if (iop.tk==0){
       if(iop.id==0){
         df <- c(df,dk)
@@ -120,6 +134,7 @@ convertmlx <- function(data, dataIn){
     
     attr(dk,"name")=ak$name
     dd[[ak$name]] = dk
+    
   }
   
   #   if (length(df)>0){
@@ -139,7 +154,7 @@ convertmlx <- function(data, dataIn){
       mval <- NULL
       for (k in (1:length(g))){
         ik <- which(vval[,jid]==k)
-        mk <- matrix( rep( t( vval[ik,] ) , g[[k]]$size ) , 
+        mk <- matrix( rep( t( vval[ik,] ) , prod(g[[k]]$size) ) , 
                       ncol = ncol(vval) , byrow = TRUE )
         mval <- rbind(mval, mk)
       }
@@ -151,7 +166,7 @@ convertmlx <- function(data, dataIn){
       vv$id <- NULL
     }
     for(k in seq(1,length(dd))){
-      if (!isfield(dd[[k]],"time")){
+      if (is.null(dd[[k]]$time)){
         vdk <- cbind(vv, dd[[k]])
         j=which(names(vdk)=="group")
         if (length(j)>0){
@@ -169,6 +184,15 @@ convertmlx <- function(data, dataIn){
     dd$varlevel <- v
     
   }
+  
+  if (!is.null(id.ori)){
+    for(k in seq(1,length(dd))){
+      if (!is.null(dd[[k]]$id)){
+        dd[[k]]$id <- id.ori[dd[[k]]$id]
+      }
+    }
+  }
+  
   if (iop.gout==1)
     dd$group=g
   

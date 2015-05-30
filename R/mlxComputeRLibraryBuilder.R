@@ -15,7 +15,9 @@ mlxComputeRLibraryBuilder <- function(lixoftHOME){
     }
     
     fileConn <- file(makeVarsFile, open="w")
-    writeLines("PKG_CPPFLAGS += -DCONNECTOR_R", con = fileConn, sep = "\n", useBytes = FALSE)
+    
+    writeLines("PKG_CPPFLAGS +=  -DCONNECTOR_R", con = fileConn, sep = "\n", useBytes = FALSE)
+    
     writeLines("PKG_LIBS=`Rscript -e \"Rcpp:::LdFlags()\"`", con = fileConn, sep = "\n", useBytes = FALSE)
     
     if (myOS == "Linux"){
@@ -64,13 +66,14 @@ mlxComputeRLibraryBuilder <- function(lixoftHOME){
   
   if (myOS == "Windows" ){ 
     myOldENVPATH = Sys.getenv('PATH');
-    myNewENVPATH = sprintf("%s;%s/tools/MinGW/bin", myOldENVPATH, lixoftHOME);
+    #myNewENVPATH = sprintf("%s;%s/../tools/MinGW/bin;%s/tools/MinGW/bin", myOldENVPATH, lixoftHOME,lixoftHOME);
+    myNewENVPATH = sprintf("%s/../tools/MinGW/bin;%s/tools/MinGW/bin;%s", lixoftHOME,lixoftHOME,myOldENVPATH);
+    
     Sys.setenv('PATH'=myNewENVPATH)
     dirWheremlxComputeRIsInstalled = sprintf("%s/lib", lixoftHOME)
     owd <- setwd(dirWheremlxComputeRIsInstalled)
     dyn.load(mlxComputeFileName)
-    setwd(owd)
-    
+    setwd(owd)        
   } else {
     dyn.load(mlxComputeFileName)
   }

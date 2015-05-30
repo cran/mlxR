@@ -10,7 +10,7 @@
 #'   \item \code{number} the number of intervals (i.e. the number of percentiles minus 1).
 #'   \item \code{level} the largest interval (i.e. the difference between the lowest and the highest percentile).
 #' }
-#' @param y.lim vector of length 2, giving the y coordinate range
+#' @param y.lim the use of y.lim is deprecated. You can use prctile(...)+ylim(...) instead.
 #' @param plot if \code{TRUE} the empirical distribution is displayed, if \code{FALSE}
 #' the values of the percentiles are returned
 #' 
@@ -74,20 +74,29 @@
 #' @export         
 prctilemlx <- function(r,band=list(number=8,level=80),y.lim=NULL,plot=TRUE)
 {
+  if (!is.null(y.lim))
+    warning("The use of y.lim is deprecated. You can use  prctile(...) +ylim(...) instead.")
+
   alpha <- band$level
   m <- band$number
   
   q1=(1-alpha/100)/2
   q2=1-q1
-  q=seq(q1,q2,length.out=m+1)
-  if (m%%2==0){
+
+
+  if (m%%2!=0){
+    m.test <- 0
+    q=seq(q1,q2,length.out=(m+1))
+    q <- append(q,0.5,(m+1)/2) 
+    m <- m+1
+  }else{
+    m.test <- 1
+    q=seq(q1,q2,length.out=m+1)
     q <- append(q,0.5,m/2) 
     q[m/2+2] <- 0.5
     m <- m+1
-    m.test <- 1
-  }else{
-    m.test <- 0
   }
+  
   
   N <- length(unique(r$id))
   n <- length(which(r$id==r$id[1]))
@@ -105,7 +114,7 @@ prctilemlx <- function(r,band=list(number=8,level=80),y.lim=NULL,plot=TRUE)
   }else{
     cl=hsv(.8,.8,.7,seq(0.2,0.93,length.out=ncol)) 
   }
-  if (m.test==1)
+   if (m.test==1)
     cl[ncol] <- hsv(.8,1,.5)
   color <- c(cl,rev(cl))
   
@@ -149,8 +158,6 @@ prctilemlx <- function(r,band=list(number=8,level=80),y.lim=NULL,plot=TRUE)
     
     bq <- as.character(rev(vq))
     sfm = scale_fill_manual(name="proba",values=colq,breaks=bq)
-    if (is.null(y.lim))
-      y.lim <- c(min(y[1,]),max(y[nq,]))
     
     pr <- NULL
     for (j in (1:(nq-1)))
@@ -158,7 +165,9 @@ prctilemlx <- function(r,band=list(number=8,level=80),y.lim=NULL,plot=TRUE)
     
     datapoly <- data.frame(x,pr,v,vf)    
     pk<-ggplotmlx(datapoly, aes(x=x, y=pr)) + geom_polygon(aes(fill=vf, group=vf)) +
-      xlab("time")+ylab(y.label)+ylim(y.lim) 
+      xlab("time")+ylab(y.label) 
+    if (!is.null(y.lim))
+       pk <- pk + ylim(y.lim) 
     pk <- pk +sfm
     if (m.test==1){
       data0 <- data.frame(y=y[(nq+1)/2,],x=t)

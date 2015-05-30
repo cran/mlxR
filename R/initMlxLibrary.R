@@ -1,30 +1,47 @@
 #' @importFrom Rcpp sourceCpp
+#' @importFrom tcltk tk_choose.dir
+
 NULL
 
 NAMESPACE <- environment()
 mlx_library_ready <- FALSE
-
+SYS_PATH_mlx_library<-""
 initMlxLibrary <- function(){
-  if( mlx_library_ready ) return()
+  if( mlx_library_ready ){
+    Sys.setenv('PATH'=NAMESPACE[["SYS_PATH_mlx_library"]])
+    return()
+  }
+  mess.mlxlibrary="\n\nMlxlibrary has probably not been installed. You can install it from  
+http://download.lixoft.com/?software=mlxlibrary
 
-  mess.mlxlibrary="\n\nMlxlibrary has probably not been installed. 
-You can install it from  http://download.lixoft.com/?software=mlxlibrary\n
-Otherwise, execute <Mlxlibrary PATH>/lib/mlxLibraryFirstLaunch.exe"
+Otherwise, provide the path of the Mlxlibrary using the directory browser.
 
+You can also run the following R command from the console:
+> setMlxLibraryPath(<Mlxlibrary PATH>) 
+"
+  
   #--- ensuring mlx library from lixsoft is installed
-  myOS <- Sys.info()['sysname'];
-  LIXOFT_HOME <- Sys.getenv( "LIXOFT_HOME" )
-  lixoft.path <- if( identical( LIXOFT_HOME, "" ) ){
+  myOS <- Sys.info()['sysname']; 
+  lixoft.path <- {
     if (myOS == "Windows"){ 
-       file.path(Sys.getenv("USERPROFILE"),"lixoft")
+      file.path(Sys.getenv("USERPROFILE"),"lixoft")
     } else {
-       file.path(Sys.getenv("HOME"),"lixoft")
+      file.path(Sys.getenv("HOME"),"lixoft")
     }
-  } else LIXOFT_HOME
+  } 
+  
+  
+  opt.inner <- options( show.error.messages=FALSE) 
+  on.exit( options( opt.inner)) 
   
   lixoft.ini  <- file.path(lixoft.path,"lixoft.ini")
   if (!file.exists(lixoft.ini)){
-    stop("The file ",lixoft.ini," does not exists.",mess.mlxlibrary)
+    wm <- paste0("\nThe file ",lixoft.ini," does not exists.",mess.mlxlibrary)
+    warning(wm, immediate.=TRUE, call.=FALSE)
+    mlx.path <- setMlxLibraryPath()
+    cat("\nYou can now try to run again your R script\n")
+    stop("",call.=FALSE)
+    
   } 
   lines <- readLines(lixoft.ini)
   
@@ -33,14 +50,18 @@ Otherwise, execute <Mlxlibrary PATH>/lib/mlxLibraryFirstLaunch.exe"
     rx <- sprintf( "%s=", name)
     line <- grep( rx, lines, fixed=TRUE, value=TRUE)
     if( length(line) ){
-        normalizePath( gsub( rx, "", line[1L] ) )
+      normalizePath( gsub( rx, "", line[1L] ) )
     }
   }
   
   #---  Mlxlibrary and MlxPlore paths  
   mlxlibrary.path <- get_lixoft_path("mlxlibrary")
   if (is.null(mlxlibrary.path) || !file.exists(file.path(mlxlibrary.path,'lib')) ) {
-    stop(mess.mlxlibrary,call.="FALSE")
+    wm <- paste0("\n",mess.mlxlibrary)
+    warning(wm, immediate.=TRUE)
+    mlx.path <- setMlxLibraryPath()
+    cat("\nYou can now try to run again your R script\n")
+    stop("",call.=FALSE)
   }
   Sys.setenv(session.simulx=mlxlibrary.path)
   
@@ -53,13 +74,37 @@ Otherwise, execute <Mlxlibrary PATH>/lib/mlxLibraryFirstLaunch.exe"
       Sys.setenv(session.mlxplore=mlxplore.path)    
     }
   }
-
+  
   #--- load Mlxlibrary
   mlxComputeRLibraryBuilder(mlxlibrary.path)
+  
+  #--- load C++ Data reader for Mlxlibrary
+  mlxDataReaderRLibraryBuilder(mlxlibrary.path)
   
   unlock <- unlockBinding
   unlock( "mlx_library_ready", NAMESPACE )
   NAMESPACE[["mlx_library_ready"]] <- TRUE
+  unlock( "SYS_PATH_mlx_library", NAMESPACE )
+  NAMESPACE[["SYS_PATH_mlx_library"]] <-Sys.getenv('PATH')
   
 }
 
+#' Sets the MlxLibrary path in order to tell mlxR where is the MlxLibrary to use
+#'     
+#' @param mlxLibraryPath  the absolute path to the location of MlxLibrary 
+#' @export
+setMlxLibraryPath <- function(mlxLibraryPath=NULL){
+  myOS <- Sys.info()['sysname']; 
+  if (myOS == "Windows"){
+    if (is.null(mlxLibraryPath))
+      mlxLibraryPath <- tk_choose.dir(caption = 'Select the MlxLibrary folder (usually in "C:/ProgramData/Lixoft") ')
+    lauchCommand<-file.path(mlxLibraryPath,"/lib/mlxLibraryFirstLaunch.exe")
+    
+  } else {
+    if (is.null(mlxLibraryPath))
+      mlxLibraryPath <- tk_choose.dir(caption = 'Select the MlxLibrary folder (usually in user directory) ')
+    lauchCommand<-paste0(mlxLibraryPath,"/lib/mlxLibraryFirstLaunch")
+  }
+  system(lauchCommand)
+  return(mlxLibraryPath)
+}

@@ -17,24 +17,92 @@ processing_monolix  <- function(project,model,treatment,param,output,group)
   #       XML FILENUL
   #*************************************************************************
   infoProject <- getInfoXml(project)
+  n.output <- length(infoProject$output)
   
   ##************************************************************************
   #       DATA FILE
   #**************************************************************************
-  datas <- readdatamlx(infoProject)
+  # datas <- readdatamlx(infoProject)
+  
+  # Read file with  c++  code called by mlxDataReader
+  colTypes <- strsplit(infoProject$dataheader, ",")
+  argList <- list(TXT_FILE=infoProject$datafile, COL_TYPES=colTypes[[1]])
+  dot_call<-.Call;
+  datas2 <-dot_call("mlxDataReaderR", argList, PACKAGE = "mlxDataReaderR");
+  
+  # set the storage of datas2 into the  format of datas 
+  obsi = 0
+  covi = 0
+  idsources = 0
+  idcovariate = 0
+  idobservation <- c()
+  idcovariate <-c()
+  for(i in 1:(length(datas2)-1))
+  {
+    if(datas2[[i]]$label == "dose")
+    {
+      idsources = i
+    }
+    if(datas2[[i]]$label == "longitudinal")
+    {
+      obsi = obsi+1
+      idobservation<- c(idobservation,i)      
+    }
+    if(datas2[[i]]$label == "covariate")
+    {
+      covi = covi +1
+      idcovariate <-c(idcovariate,i)
+    }
+    
+  }
+  
+  if(idsources)
+  {
+    sources<-list(label="source",name="doseRegimen", colNames=datas2[[idsources]]$colTypes,
+                  value=matrix(unlist(datas2[[idsources]]$values),nrow=length(datas2[[idsources]]$values),byrow = TRUE))  
+  } else
+  {
+    sources =NULL
+  }
+  observation <-c()
+  obsi <- min(obsi, n.output)
+  for(i in  1:obsi)
+  {
+    obsvalue=matrix(unlist(datas2[[idobservation[i]]]$values),nrow=length(datas2[[idobservation[i]]]$values),byrow = TRUE)
+    observation<- c(observation,list(list( label="observation", name=infoProject$output[i],colNames=c("id", "time"),
+                                           value=obsvalue[,1:2])))
+  }
+  
+  datas <-list(sources=sources,observation=observation)
+  
+  if(covi)
+  {
+    covariate <-c()
+    for(i in  1:covi)
+    {
+      covariate<-c(covariate,list(list(name=datas2[[idcovariate[i]]]$colNames[2:length(datas2[[idcovariate[i]]]$colNames)],
+                                       value=matrix(unlist(datas2[[idcovariate[i]]]$values),nrow=length(datas2[[idcovariate[i]]]$values),byrow = TRUE),
+                                       label=datas2[[idcovariate[i]]]$label, colNames=c("id",datas2[[idcovariate[i]]]$colNames[2:length(datas2[[idcovariate[i]]]$colNames)]) )))
+    }
+    datas <- append(datas,list(covariate=covariate))
+  }
   if (!is.null(group)){
-    if ((length(names(group))>1) | (is.null(group$size)))
+    if ((length(names(group[[1]]))>1) | (is.null(group[[1]]$size)))
       stop("When simulx is used with a monolix project, 'group' should be a list with only one field 'size'")
-    datas <- resample.data(datas,group$size)
+    datas <- resample.data(datas,group[[1]]$size)
   }
   
   ##************************************************************************
   #       treatment (TREATMENT)
   #**************************************************************************
-  if (is.null(treatment))
-    treatment = datas$sources
-  
-  
+  if (is.null(treatment)){
+    if (is.null(datas$sources)){ 
+      treatment = datas$sources
+    } else{
+    treatment = data.frame(datas$sources$value)
+    names(treatment) <- datas$sources$colNames 
+    }
+  }
   ##************************************************************************
   #       PARAMETERS
   #**************************************************************************
@@ -101,12 +169,15 @@ processing_monolix  <- function(project,model,treatment,param,output,group)
     }
   }
   #**************************************************************************
-  test.colNames <- testC(list(treatment,param,output))
-  if (test.colNames==TRUE){
-    group=NULL
-  }else{
-    group <- list(size=c(group$size, 1) , level=c("individual","longitudinal"))
-  }
+  #  TO CHECK:
+  #   test.colNames <- testC(list(treatment,param,output))
+  #   if (test.colNames==TRUE){
+  #     group=NULL
+  #   }else{
+  #     group=NULL
+  #     # TODO BUG  !!!!!!!! *************************
+  #     #group <- list(size=c(group$size, 1) , level=c("individual","longitudinal"))
+  #   }
   ans = list(model=model, treatment=treatment, param=param, output=output, group=group)
   return(ans)
 }
@@ -277,7 +348,12 @@ readIndEstimate  <-  function(filename, estim=NULL)
     names(value) = header;
     value        = as.matrix(data[, c(1, idx)])
     #value       = data.matrix(data[, c(1, idx)])
-    param        = list( value= value, name=name, colNames=header)
+    if(!(is.null(estim)))
+    { 
+      param        = list( value= value, name=name, colNames=header,label=estim)
+    }else{
+      param        = list( value= value, name=name, colNames=header)
+    }
     return(param)
   }else
   {
