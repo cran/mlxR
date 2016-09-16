@@ -47,8 +47,9 @@ processing_monolix  <- function(project,model=NULL,treatment=NULL,parameter=NULL
     }
     
     #     if (is.character(param))  {
-    if (length(param)==1  && any(sapply(param,is.character))) {
-      file = file.path(infoProject$resultFolder,'indiv_parameters.txt') 
+    # if (length(param)==1  && any(sapply(param,is.character))) {
+      if (any(sapply(param,is.character))) {
+        file = file.path(infoProject$resultFolder,'indiv_parameters.txt') 
       datas$parameter = readIndEstimate(file,param[which(sapply(param,is.character))])
       #        datas$parameter = readIndEstimate(file,param)
       iop_indiv=1
@@ -171,6 +172,10 @@ processing_monolix  <- function(project,model=NULL,treatment=NULL,parameter=NULL
       sections       = c("LONGITUDINAL")    
       myparseModel(model, sections, model )
     }
+    if (length(grep("MonolixSuite2016R1",session)))
+    {
+    patchCor(model)
+    }
   }
   #**************************************************************************
   #   test.colNames <- testC(list(treatment,param,output))
@@ -198,7 +203,9 @@ processing_monolix  <- function(project,model=NULL,treatment=NULL,parameter=NULL
       regModelNames<-c()
       for(line in seq(1:length(regressorLine)))
       {
-        regModelNamesTable<-strsplit(regressorLine[line],"[\\{ \\} , ]")[[1]]
+        comment<-";"
+        lineNoComment<-strsplit(regressorLine[line],comment)[[1]]
+        regModelNamesTable<-strsplit(lineNoComment,"[\\{ \\} , ]")[[1]]
         for( i in seq(1:length(regModelNamesTable))){
           regi <- regModelNamesTable[i]
           if(!identical(regi,"")&&!length(grep("=",regi,fixed=TRUE,value=TRUE))

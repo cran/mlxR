@@ -22,6 +22,9 @@
 #' \itemize{
 #'   \item \code{name}: a vector of output names
 #'   \item \code{time}: a vector of times (only for the longitudinal outputs)
+#'   \item \code{lloq}: lower limit of quantification (only for the longitudinal outputs)
+#'   \item \code{uloq}: upper limit of quantification (only for the longitudinal outputs)
+#'   \item \code{limit}: lower bound of the censoring interval (only for the longitudinal outputs)
 #' }
 #' @param treatment a list with fields
 #' \itemize{
@@ -122,7 +125,6 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   initMlxLibrary()
   session=Sys.getenv("session.simulx")
   if (!is.null(varlevel) && grepl('MonolixSuite2016R1',session))
-    # if (!is.null(varlevel) && grepl('mlxsuite-release',session))
   {
     cat("\nvarlevel is not supported with this version of mlxLibrary\n")
     return()
@@ -154,8 +156,6 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   
   if (isfield(settings,"record.file"))  
     warning("\n\n 'record.file' is a deprecated option. Use 'result.file' instead.")
-  #   if (!is.null(result.file) &&  !is.null(result.folder))
-  #     warning("\n\n You can define either 'result.file' or 'result.folder', not both...")
   
   #--------------------------------------------------
   #    R MODEL
@@ -170,7 +170,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   #     reshape inputs
   #--------------------------------------------------
   group     <- mklist(group)
-  parameter <- mklist(parameter)
+  parameter <- mklist(parameter, add.name = F)
   treatment <- mklist(treatment)
   regressor <- mklist(regressor)
   varlevel  <- mklist(varlevel)
@@ -187,26 +187,47 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   stat.n <- NULL
   stat.0 <- NULL
   stat.a <- list()
-  for (k in (1:length(output))){
-    outk <- output[[k]]
-    outk$type <- NULL
-    if (is.null(outk$time))
-      outk.n <- "parameter"
-    else
-      outk.n <- outk$name
-    outk$name <- NULL
-    outk$time <- NULL
-    if (length(outk)>0)
-    {
-      stat.n <- c(stat.n, outk.n)
-      stat.a <- c(stat.a, rep(list(outk),length(outk.n)))
-    } else if (write.simul==T) {
-      stat.0 <- c(stat.0, outk.n)
+  loq.n <- NULL
+  loq.a <- list()
+  loq.arg <- c("limit", "lloq", "uloq")
+  arg.names <- c("name", "time", loq.arg)
+  if (length(output)>0)
+  {
+    ik0 <- NULL
+    for (k in (1:length(output))){
+      outk <- output[[k]]
+      outk$type <- NULL
+      if (!all(sapply(outk[loq.arg],"is.null")))
+      {
+        loq.n <- c(loq.n, outk$name)
+        iloq <- which(sapply(outk[loq.arg],"is.null")==FALSE)
+        loq.a <- c(loq.a, rep(list(outk[loq.arg[iloq]]),length(outk$name)))
+        if (!(is.null(project)) && is.null(outk$time))  
+        {
+          ik0 <- c(ik0, k)
+        }
+      }
+      if (is.null(outk$time))
+        outk.n <- "parameter"
+      else
+        outk.n <- outk$name
+      outk[arg.names] <- NULL
+      if (length(outk)>0)
+      {
+        stat.n <- c(stat.n, outk.n)
+        stat.a <- c(stat.a, rep(list(outk),length(outk.n)))
+      } else if (write.simul==T) {
+        stat.0 <- c(stat.0, outk.n)
+      }
     }
+    output[ik0] <- NULL
+    if (length(output)==0)
+      output <- NULL
   }
   if (write.simul==T)
-    stat.0 <- c(stat.0, "treatment")
+    stat.0 <- c(stat.0, "treatment", "covariate")
   names(stat.a)=stat.n
+  names(loq.a)=loq.n
   
   #--------------------------------------------------
   #     Monolix project
@@ -245,13 +266,16 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     infoParam <- ans$infoParam
     id        <- as.factor(ans$id$oriId)
     N         <- nlevels(id)
+    test.pop <- F
     if (iproj.pop==T)
     {
+      test.pop <- T
       if(is.null(fim))
         stop('The covariance matrix of the population parameters is requested for simulating several replicates 
            of the population parameters')
       else 
         parameter[[1]] <- sim.pop(npop,parameter[[1]],infoParam,fim,kw.max=kw.max)
+      parameter[[1]]$pop <- (1:npop)
     } 
     else if (!is.null(p.pop))
     {
@@ -260,7 +284,6 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     }
     test.project <- T
     test.N <- T
-    test.pop <- F
   }
   else
   {
@@ -312,7 +335,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
         npop <- nrow(paramk)
         paramk$pop <- NULL
         parameter[[k]] <- paramk[1,]
-        if (npop>1){
+        if (npop>=1){
           test.pop <- T
           k.pop <- k
           pop.mat <- paramk
@@ -393,14 +416,12 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
         cat("population: ",ipop,"\n")
     }
     irw <- 0
-    if (test.pop == T)  parameter[[k.pop]] <- pop.mat[ipop,]
+    if (test.pop == T)  lv$parameter[[k.pop]] <- pop.mat[ipop,]
     if (test.rep == T)
     {
       if (test.N==F)  
         lv$group <- group
       dataIn <- simulxunit(model=model,lv=lv,settings=c(settings, data.in=T))
-      settings$data.in=F
-      settings$load.design=F
     }
     for (irep in (1:nrep))
     {
@@ -413,8 +434,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
       
       if (test.rep == T)
       {
-        r <- simulxunit(data = dataIn,settings=settings, out.trt=out.trt)
-        # r$treatment <- NULL
+        r <- simulxunit(data = dataIn,settings=c(settings,load.design=F), out.trt=out.trt)
       } 
       else 
       {
@@ -425,8 +445,50 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
         r <- simulxunit(model=model,lv=lv,settings=settings, out.trt=out.trt)
       }
       
-      rs <- r
-      rs[stat.0] <- NULL
+      if (length(loq.n) > 0)
+      {
+        for (k in (1:length(loq.n)))
+        {
+          rnk <- loq.n[k]
+          if (!is.null(rnk))
+          {    
+            r[[rnk]]$cens <- 0
+            loqk <- loq.a[[k]]
+            if (!is.null(loqk$limit))
+              r[[rnk]]$limit <- loqk$limit
+            if (!is.null(loqk$lloq))
+            {
+              ik <- which(r[[rnk]][[rnk]] < loqk$lloq )
+              r[[rnk]][[rnk]][ik] <- loqk$lloq
+              r[[rnk]]$cens[ik] <- 1
+            }
+            if (!is.null(loqk$uloq))
+            {
+              ik <- which(r[[rnk]][[rnk]] > loqk$uloq )
+              r[[rnk]][[rnk]][ik] <- loqk$uloq
+              r[[rnk]]$cens[ik] <- -1
+            }
+            r[[rnk]]$cens <- factor(r[[rnk]]$cens, levels=c("0","1","-1"))
+          }
+        }
+      }
+      
+      if (!(is.null(project))) 
+      {
+        r$covariate <- parameter[[2]]
+        r$covariate$id <- (1:length(r$covariate$id))
+        attr(r$covariate,"type") <- "covariate"
+      }
+      
+      if (!(is.null(project)) && write.simul==TRUE)
+      {
+        rs <- r[which(names(r) %in% c("originalId","group"))]
+      } 
+      else
+      {
+        rs <- r
+        rs[stat.0] <- NULL
+      }
       if (length(stat.n) > 0)
       {
         for (k in (1:length(stat.n)))
@@ -518,8 +580,9 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     pop <- format(pop, digits = 5, justify = "left")
     pop <- cbind(pop=(1:npop),pop)
   }
-  if (!(is.null(project))) 
+  else if (!(is.null(project))) {
     pop <- parameter[[1]]
+  }
   if (!is.null(pop))
   {
     if (write.simul==TRUE)
@@ -529,6 +592,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     } 
     R.complete$population <- pop
   }
+  
   
   Sys.setenv(LIXOFT_HOME="")
   Sys.setenv('PATH'=myOldENVPATH);
@@ -577,7 +641,6 @@ simulxunit <- function(model=NULL, lv=NULL, data=NULL, settings=NULL, out.trt=T)
       iop.group <- 0
     #--------------------------------------------------
     
-    #     doseRegimen <- lv$treatment
     lv$model <- model
     id.ori <- lv$id
     gr.ori <- lv$gr.ori
@@ -591,7 +654,6 @@ simulxunit <- function(model=NULL, lv=NULL, data=NULL, settings=NULL, out.trt=T)
       dataIn$iop.group <- iop.group
       dataIn$id.ori <- id.ori
       s$loadDesign <- TRUE
-      #       return(dataIn)
     }    
   }else{
     dataIn <- data
@@ -608,7 +670,6 @@ simulxunit <- function(model=NULL, lv=NULL, data=NULL, settings=NULL, out.trt=T)
   else
     trt <- NULL
   
-  # dataIn$trt <- NULL
   if (length(s)==0){
     argList <- list(DATA=dataIn) 
   } else {
@@ -628,8 +689,12 @@ simulxunit <- function(model=NULL, lv=NULL, data=NULL, settings=NULL, out.trt=T)
     if (!exists("gr.ori"))
       gr.ori <- NULL
     dataOut  <- convertmlx(dataOut,dataIn,trt,iop.group,id.out,id.ori,gr.ori)
-    if(!is.null(id.ori) && is.data.frame(id.ori))
+    if (!is.null(id.ori)) 
+    {
+      if (!is.data.frame(id.ori))
+        id.ori <- data.frame(newId=(1:length(id.ori)), oriId=id.ori)
       dataOut$originalId <- id.ori
+    }
     return(dataOut)
   }
 }

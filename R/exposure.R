@@ -66,6 +66,7 @@
 #' \code{tmin} (time of minimum value), \code{cmin} (minimum value).
 #' 
 #' @importFrom utils tail
+#' @importFrom stats sd
 #' @export
 exposure <- function(model,output, group=NULL,treatment=NULL,parameter=NULL,
                      data=NULL, project=NULL, settings=NULL, regressor=NULL, varlevel=NULL)
@@ -79,7 +80,7 @@ exposure <- function(model,output, group=NULL,treatment=NULL,parameter=NULL,
     if (is.null(output$ntp)) {ntp<-100}  else {ntp<-output$ntp}
     if (is.null(output$ngc)) {ngc<-5}    else {ngc<-output$ngc}
     if (is.null(output$tol)) {tol<-0.01} else {tol<-output$tol}
-        
+    
     # groups and treatment
     if (is.null(group))
       group <- list(NULL)
@@ -194,10 +195,18 @@ Try increasing ngc, or fix the number of doses")
   t.min <- min(t)
   t.max <- max(t)
   t.n   <- length(t)
-  t.step <- (t.max - t.min)/(t.n-1)
-  t.time <- seq(t.min,t.max, by=t.step)
-  output$time <- t.time
-  
+  if (sd(diff(t))<mean(diff(t))*0.001)
+  {
+    cst.step <- T
+    t.step <- (t.max - t.min)/(t.n-1)
+    output$time <- seq(t.min,t.max, by=t.step)
+  }
+  else
+  {
+    cst.step <- F
+    t.step <- NA
+    dt <- diff(t)
+  }
   r.simul <- simulx(model=model,group=group,treatment=treatment,parameter=parameter,
                     output=output,data=data,project=project,settings=settings,
                     regressor=regressor,varlevel=varlevel)
@@ -235,7 +244,10 @@ Try increasing ngc, or fix the number of doses")
         imax <- which.max(fki)
         tmax[i] <- tki[imax]
         cmax[i] <- fki[imax]
-        auc[i] <- ((fki[1]+fki[t.n])/2+sum(fki[2:(t.n-1)]))*t.step
+        if (cst.step)
+          auc[i] <- ((fki[1]+fki[t.n])/2+sum(fki[2:(t.n-1)]))*t.step
+        else
+          auc[i] <- sum(dt*(fki[1:(t.n-1)]+fki[2:t.n]))/2
         if (i.group){ gr[i] <- rki$group[1]  }
       }
       if (!i.id){

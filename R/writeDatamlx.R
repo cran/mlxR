@@ -77,9 +77,8 @@ writeDatamlx <- function(r,result.file=NULL,result.folder=NULL,sep=",",ext=NULL,
     y.attr <- sapply(r,attr,"type")
     j.long <- which(y.attr=="longitudinal")
     y <- NULL
-    #     if (length(j.long)==1){
-    #       y <- r[[j.long]]
-    #     }else if (length(j.long)>1){
+    rlong.names <- sapply(r[j.long],"names")
+    rln <- unique(unlist(rlong.names))
     for (k in (1:length(j.long))){
       rk <- r[[j.long[k]]]
       nk <- names(r[j.long[k]])
@@ -88,9 +87,16 @@ writeDatamlx <- function(r,result.file=NULL,result.folder=NULL,sep=",",ext=NULL,
         y <- rk
       } else {
         yk <- cbind(rk,list(ytype=k))
+        if ("cens" %in% rln && is.null(yk$cens))  
+          yk$cens <- "0"
+        if ("limit" %in% rln && is.null(yk$limit))  
+          yk$limit <- NA
         y <- rbind(y,yk)
       }
     }
+    i0 <- which(y$cens==0)
+    if (length(i0)>0 && !is.null(y$limit))
+      y$limit[i0] <- NA
     M <- y
     
     if (!is.null(r$treatment)){
@@ -111,7 +117,24 @@ writeDatamlx <- function(r,result.file=NULL,result.folder=NULL,sep=",",ext=NULL,
       M <- merge(M,r$parameter,all=T)
       n2 <- ncol(M)
       occ <- M[,(n1+1):n2]
-      n <- nrow(occ)
+      n <- nrow(M)
+      if (n2==n1+1)
+        dim(occ) <- c(n,1)
+      for (i in (2:n)){
+        if (any(is.na(occ[i,])))
+          occ[i,] <- occ[(i-1),]
+      }
+      M[,(n1+1):n2] <- occ
+    }
+    
+    if (!is.null(r$covariate)){
+      n1 <- ncol(M)
+      M <- merge(M,r$covariate,all=T)
+      n2 <- ncol(M)
+      occ <- M[,(n1+1):n2]
+      n <- nrow(M)
+      if (n2==n1+1)
+        dim(occ) <- c(n,1)
       for (i in (2:n)){
         if (any(is.na(occ[i,])))
           occ[i,] <- occ[(i-1),]
