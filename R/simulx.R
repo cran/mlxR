@@ -51,6 +51,12 @@
 #'   \item \code{treatment} : if different treatements per group are defined,
 #'   \item \code{regressor} : if different regression variables per group are defined.
 #' }
+#' @param addlines a list with fields: 
+#' \itemize{
+#'   \item \code{section}: a string (default = "[LONGITUDINAL]"),
+#'   \item \code{block}: a string (default = "EQUATION:"),
+#'   \item \code{formula}: string, or vector of strings, to be inserted .
+#' }
 #' @param data a list (output of simulx when settings$data.in==TRUE)
 #' @param project the name of a Monolix project
 #' @param nrep number of replicates
@@ -110,7 +116,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
                    regressor=NULL, varlevel=NULL, group=NULL, 
                    data=NULL, project=NULL, nrep=1, npop=NULL, fim=NULL, 
                    result.folder=NULL, result.file=NULL, stat.f="statmlx",
-                   settings=NULL)
+                   addlines=NULL, settings=NULL)
 { 
   #--------------------------------------------------
   #  simulx.R is governed by the CeCILL-B license. 
@@ -132,7 +138,8 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   Sys.setenv(LIXOFT_HOME=session)
   
   if (is.null(settings$seed))
-    settings$seed <- round(runif(1)*100000)
+    settings$seed <-  round(as.numeric(Sys.time())*1000*runif(1))%%1e11/100
+  
   set.seed(settings$seed)
   disp.iter <- ifelse((!is.null(settings$disp.iter) && settings$disp.iter==TRUE), TRUE, FALSE)
   sep <- settings$sep
@@ -145,7 +152,6 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   if (is.null(settings$replacement)) replacement <- FALSE
   out.trt <- settings$out.trt
   if (is.null(settings$out.trt))  out.trt <- T
-  
   if (!is.null(data))
   {
     r <- simulxunit(data=data,settings=settings)
@@ -196,6 +202,8 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     ik0 <- NULL
     for (k in (1:length(output))){
       outk <- output[[k]]
+      if (is.null(outk$name))
+        stop("\n'name' is missing in the definition of an output\n")
       outk$type <- NULL
       if (!all(sapply(outk[loq.arg],"is.null")))
       {
@@ -229,12 +237,12 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   names(stat.a)=stat.n
   names(loq.a)=loq.n
   
+  
   #--------------------------------------------------
   #     Monolix project
   #--------------------------------------------------
   if (!(is.null(project)))  
   {
-    
     if (!is.null(npop))
     {
       iproj.pop <- T
@@ -255,6 +263,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
                                group=group,
                                fim=fim
     )
+    ans <- select.data(ans)
     model     <- ans$model
     treatment <- ans$treatment
     parameter <- ans$param
@@ -296,19 +305,16 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     id <- NULL
     test.N <- F
     test.pop <- F
-    for (k in (1:length(l.input)))
-    {
+    for (k in (1:length(l.input))) {
       lk <- l.input[k]
       eval(parse(text=paste0('pk <- ',lk))) 
       pk<- dpopid(pk,lk)
-      if (!is.null(pk$N))
-      {
+      if (!is.null(pk$N)) {
         test.N <- T
         if (!is.null(pk$id)) 
           id <- unique(c(id, pk$id))
       }
-      if (!is.null(pk$npop))
-      {
+      if (!is.null(pk$npop)) {
         test.pop <- T
         npop <- unique(c(npop,pk$npop))
         if (length(npop)>1)
@@ -344,13 +350,23 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     } 
   }
   
+  #--------------------------------------------------
+  #     Add equations in the Mlxtran model code
+  #--------------------------------------------------
+  if (!is.null(addlines))
+    model <- modify.mlxtran(model, addlines)
+  
+  # For time to event output, add a right censoring time = 1e10 if missing
+   if (!Rmodel)
+     model <- rct.mlxtran(model)
+  
+  #--------------------------------------------------
   lv <- list(treatment=treatment,
              parameter=parameter,
              output=output,
              regressor=regressor,
              varlevel=varlevel,
              id=id)
-  
   if (test.N==T && !is.null(group))
   {
     if (any(sapply(group, function(x) is.null(x$size))))
@@ -370,18 +386,20 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
       if ("treatment" %in% u.name)
       {
         tr <- NULL
-        for (k in (1:ng))
-        {
+        i2 <- 0
+        for (k in (1:ng)) {
+          i1 <- i2+1
+          i2 <- i2 + group[[k]]$size
           tk <- as.data.frame(group[[k]]$treatment)
-          tk <- tk[rep(seq.int(1,nrow(tk)), group[[k]]$size), ]
-          #           tk$group <- k
+          ntk <- nrow(tk)
+          tk <- tk[rep(seq.int(1,ntk), group[[k]]$size), ]
+          tk$id <- rep(seq(i1,i2),each=ntk)
           if (is.null(tr))
             tr <- tk
           else
-            tr <- merge(tr,tk, all=T)
+            tr <- merge(tr,tk, all=T, sort=FALSE)
         }
         tr[is.na(tr)]='.'
-        tr <- cbind(data.frame(id=as.factor(seq(1:sum(g.size)))),tr)
         lv$treatment <- tr
       }
       gr.ori <- NULL
@@ -404,8 +422,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   
   R.complete <- list()
   rs <- NULL
-  
-  
+
   for (ipop in (1:npop))
   {
     if (disp.iter==TRUE) 
@@ -423,11 +440,11 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
         lv$group <- group
       dataIn <- simulxunit(model=model,lv=lv,settings=c(settings, data.in=T))
     }
+    lv0 <- lv
     for (irep in (1:nrep))
     {
       irw <- irw + 1
       settings$seed <- settings$seed +12345
-      
       
       if (disp.iter==TRUE && nrep>1)  
         cat("replicate: ",irw,"\n")
@@ -438,8 +455,11 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
       } 
       else 
       {
-        if (test.N==T && !is.null(group))  
-          lv <- resample.data(lv,id,sum(g.size),replacement)
+#        new.id <- sort(which(id %in% ans$treatment[[1]]$id))
+#        lv <- resample.data(data=lv,idOri=id,new.id=new.id)
+#        lv <- resample.data(data=lv,idOri=id,N=length(ans$treatment[[1]]$id),replacement=replacement)
+        if (test.N==T && !is.null(group)) 
+          lv <- resample.data(data=lv0,idOri=id,N=sum(g.size),replacement=replacement)
         if (test.N==F)  
           lv$group <- group
         r <- simulxunit(model=model,lv=lv,settings=settings, out.trt=out.trt)
@@ -472,10 +492,9 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
           }
         }
       }
-      
-      if (!(is.null(project))) 
+     if (!(is.null(project)) & (!is.null(settings$data.in) && !settings$data.in))
       {
-        r$covariate <- parameter[[2]]
+        r$covariate <- parameter[[2]][which(id%in%r$originalId$oriId),]
         r$covariate$id <- (1:length(r$covariate$id))
         attr(r$covariate,"type") <- "covariate"
       }
@@ -501,13 +520,17 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
           }
         }
       }
-      
       r.attr <- sapply(r,attr,"type")
       if (nrep>1)
       {
         for (k in (1:length(rs)))
-          if (is.data.frame(rs[[k]]))
+          if (is.data.frame(rs[[k]])) {
+            attr.name <- attr(rs[[k]],"name")
+            attr.type <- attr(rs[[k]],"type")
             rs[[k]] <- cbind(list(rep=as.factor(irw)), rs[[k]])
+            attr(rs[[k]],"name") <- attr.name
+            attr(rs[[k]],"type") <- attr.type 
+          }
       }
       
       
@@ -542,6 +565,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
             res[[k]] <- rs[[k]]
       }  
     } # irep
+
     if (length(res)>0)
     {
       for (k in (1:length(res)))
@@ -593,9 +617,14 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     R.complete$population <- pop
   }
   
-  
+
   Sys.setenv(LIXOFT_HOME="")
   Sys.setenv('PATH'=myOldENVPATH);
+
+  # For categorical output, returns the categories defined in the model, instead of {0, 1, ...}
+ if (!Rmodel)
+    R.complete <- repCategories(R.complete, model)
+  
   return(R.complete)
 }
 
@@ -655,7 +684,8 @@ simulxunit <- function(model=NULL, lv=NULL, data=NULL, settings=NULL, out.trt=T)
       dataIn$id.ori <- id.ori
       s$loadDesign <- TRUE
     }    
-  }else{
+  } else {
+    s$loadDesign <- FALSE
     dataIn <- data
     iop.group <- data$iop.group
     dataIn$iop.group <- NULL
@@ -663,19 +693,15 @@ simulxunit <- function(model=NULL, lv=NULL, data=NULL, settings=NULL, out.trt=T)
     dataIn$id.ori <- NULL
   }
   
-  
-  
   if (out.trt==T)
     trt <- dataIn$trt
   else
     trt <- NULL
-  
   if (length(s)==0){
     argList <- list(DATA=dataIn) 
   } else {
     argList <- list(DATA=dataIn, SETTINGS=s)       
   }
-  
   if (identical(file_ext(model),"R")) {Rfile <- TRUE} else {Rfile <- FALSE}
   if ( !is.null(model) && exists(model, mode="function") ){Rsource <- TRUE} else {Rsource <- FALSE}
   if (Rfile || Rsource){

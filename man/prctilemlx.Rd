@@ -4,26 +4,39 @@
 \alias{prctilemlx}
 \title{Percentiles of the empiricial distribution of longitudinal data}
 \usage{
-prctilemlx(r, band = list(number = 8, level = 80), y.lim = NULL,
-  plot = TRUE)
+prctilemlx(r, col = NULL, number = 8, level = 80, plot = TRUE,
+  color = "purple", group = NULL, facet = TRUE, labels = NULL,
+  band = NULL)
 }
 \arguments{
 \item{r}{a data frame with a column \samp{id}, a column \samp{time} and a column with values.
 The times should be the same for each individual.}
 
-\item{band}{a list with two fields
+\item{col}{a vector of 3 column numbers: (\samp{id}, \samp{time/x}, \samp{y}. Default = c(1, 2,3).}
+
+\item{number}{the number of intervals (i.e. the number of percentiles minus 1).}
+
+\item{level}{the largest interval (i.e. the difference between the lowest and the highest percentile).}
+
+\item{plot}{if \code{TRUE} the empirical distribution is displayed, if \code{FALSE}
+the values are returned}
+
+\item{color}{a color to be used for the plots (default="purple")}
+
+\item{group}{variable to be used for defining groups (by default, \samp{group} is used when it exists)}
+
+\item{facet}{makes subplots for different groups if \code{TRUE}}
+
+\item{labels}{vector of strings}
+
+\item{band}{is deprecated (use number and level instead) ; a list with two fields
 \itemize{
   \item \code{number} the number of intervals (i.e. the number of percentiles minus 1).
   \item \code{level} the largest interval (i.e. the difference between the lowest and the highest percentile).
 }}
-
-\item{y.lim}{the use of y.lim is deprecated. You can use prctile(...)+ylim(...) instead.}
-
-\item{plot}{if \code{TRUE} the empirical distribution is displayed, if \code{FALSE}
-the values of the percentiles are returned}
 }
 \value{
-a list with fields:
+a ggplot object if \code{plot=TRUE} ; otherwise, a list with fields:
 \itemize{
   \item proba a vector of probabilities of length \code{band$number+1} 
   \item color a vector of colors used for the plot of length \code{band$number}
@@ -65,26 +78,25 @@ See http://simulx.webpopix.org/mlxr/prctilemlx/ for more details.
                 group     = list(size=N, level='individual'),
                 output    = list(name='C', time=seq(0,24,by=0.1)))
   # res$C is a data.frame with 2000x241=482000 rows and 3 columns
-  res$C[1:10,]
+  head(res$C)
   # we can display the empirical percentiles of C using the default 
   # settings (i.e. percentiles of order 10\%, 20\%, ... 90\%)
-  p1   <- prctilemlx(res$C)
-  print(p1)
+  prctilemlx(res$C)
   # The 3 quartiles (i.e. percentiles of order 25\%, 50\% and 75\%) are displayed by 
   # selecting a 50\% interval splitted into 2 subintervals
-  p2  <- prctilemlx(res$C, band=list(number=2, level=50))
+  prctilemlx(res$C, number=2, level=50)
   # A one 90\% interval can be displayed using only one interval
-  p3   <- prctilemlx(res$C, band=list(number=1, level=90))
+  prctilemlx(res$C, number=1, level=90)
   # or 75 subintervals in order to better represent the continuous distribution 
   # of the data within this interval
-  p4   <- prctilemlx(res$C, band=list(number=75, level=90))
+  prctilemlx(res$C, number=75, level=90)
+  # prctilemlx produces a ggplot object that can be modified
+  pl <- prctilemlx(res$C, number=4, level=80) 
+  pl + ylab("concentration") + ggtitle("predictive distribution")
   # The percentiles are not plotted by setting plot=FALSE
-  p5   <- prctilemlx(res$C, band=list(number=4, level=80), plot=FALSE)
-  print(names(p4))
-  print(p4$proba)
-  print(p4$color)
-  print(p4$y[1:5,])
-  print(p4$y[1:5,])
+  pr.out <- prctilemlx(res$C, number=4, level=80, plot=FALSE)
+  print(pr.out$proba)
+  print(pr.out$color)
+  print(pr.out$y[1:5,])
 }
 }
-

@@ -7,6 +7,7 @@
 #' @param datafile a formatted data file 
 #' @param header a vector of strings (mandatory if \code{datafile} is used) 
 #' @param infoProject an xmlfile 
+#' @param out.data TRUE/FALSE (default=FALSE) returns the original data as a table and some information about the Monolix project  
 #' @param addl.ss number of additional doses to use for steady-state  (default=10) 
 #' 
 #' @return A list of data frames 
@@ -25,7 +26,7 @@
 #' }
 #' @importFrom stats time
 #' @export
-readDatamlx  <- function(project=NULL, datafile=NULL, header=NULL, infoProject=NULL, addl.ss=10){
+readDatamlx  <- function(project=NULL, datafile=NULL, header=NULL, infoProject=NULL, out.data=FALSE, addl.ss=10){
   # READDATAMLX
   #
   # READDATAMLX reads a datafile and create a list.
@@ -51,6 +52,7 @@ readDatamlx  <- function(project=NULL, datafile=NULL, header=NULL, infoProject=N
   
   header=unlist(strsplit(header, ",")) 
   header <- toupper(header)
+  header[header=="DPT"]="ADM"
   nlabel = length(header)
   
   icov <- icat <- iid <- iamt <- iy <- iytype <- ix <- iocc <- imdv <- NULL
@@ -103,13 +105,14 @@ readDatamlx  <- function(project=NULL, datafile=NULL, header=NULL, infoProject=N
     delimiter=""
   }else if (tolower(fileFormat)=="tab"){
     delimiter='\t'
-  }else if (tolower(fileFormat)==";"){
+  }else if (tolower(fileFormat)==";"||tolower(fileFormat)=="semicolumn"){
     delimiter=';'
   }else if (tolower(fileFormat)=="\t"){
     delimiter='\t'
   }else
     delimiter=','
   
+  catNames<-NULL
   headerTest = read.table(datafile, comment.char="",sep=delimiter, nrows=1,stringsAsFactors=FALSE)
   if(headerTest[1,1]=="#"){
     headerToUse<-headerTest[,-1]
@@ -126,8 +129,16 @@ readDatamlx  <- function(project=NULL, datafile=NULL, header=NULL, infoProject=N
     
   }else{
     data = tryCatch(
-      read.table(datafile, comment.char="", header = TRUE, sep=delimiter)
-      , error=function(e) {
+      (if(!is.null(icat)){
+        colCatType<-rep(NA,length(headerTest))
+        catNames <-headerTest[icat]
+        names(catNames)<-NULL
+        catNames<-trimws(unlist(catNames))
+        colCatType[icat]<-rep("character",length(icat))
+        read.table(datafile, comment.char="", header = TRUE, sep=delimiter,colClasses = colCatType)
+      }else{
+        read.table(datafile, comment.char="", header = TRUE, sep=delimiter)
+      }), error=function(e) {
         error<-  geterrmessage()
         message(paste0("WARNING: reading data using delimiter '",delimiter,"' failed: ", geterrmessage()))
         return( read.table(datafile, comment.char="", header = TRUE))
@@ -135,10 +146,16 @@ readDatamlx  <- function(project=NULL, datafile=NULL, header=NULL, infoProject=N
     )
   }
   
+  if (out.data) {
+    infoProject$delimiter <- delimiter
+    infoProject$dataheader <- header
+    return(list(data=data, infoProject=infoProject))
+  }
+  
   #---remove rows containing NA-------
   if (!is.null(iid)) 
   {
-    narowsData <- which(is.na(data[i,iid]))
+    narowsData <- which(is.na(data[iid])) # removed in ID column only
     if(length(narowsData)>0)
       data <- data[-narowsData,]
   }
@@ -150,10 +167,36 @@ readDatamlx  <- function(project=NULL, datafile=NULL, header=NULL, infoProject=N
   newHeader[i.new] = S0[i.new]
   
   if (!is.null(iid)){
+    iobs1   = findstrcmp(S[[iy]],'.', not=TRUE)
+    if (!is.null(imdv))
+      iobs1 <- iobs1[S[iobs1,imdv]!=1]
+    if (!is.null(ievid))
+      iobs1 <- iobs1[S[iobs1,ievid]==0]
+    i0 <- c(grep(' .',S[iobs1,iy],fixed=TRUE),grep('. ',S[iobs1,iy],fixed=TRUE))
+    if (length(i0)>0)
+      iobs1 <- iobs1[-i0]
+    #keep  the data only for  ids which have observation
+    if (!is.null(iytype)){
+      idObs <-NULL
+      ytype <- factor(S[iobs1,iytype])
+      l.ytype <- levels(ytype)
+      if (is.null(observationName))
+        observationName <- paste0("y",l.ytype)
+      n.y <- length(observationName)
+      for (in.y in (1:n.y)){
+        idObs <-c(idObs,as.character(S[iobs1[which(ytype==l.ytype[in.y])],iid]))
+      }
+      idObs<-unique(idObs)
+    } else{
+      idObs<-unique(S[[iid]][iobs1])
+    }
+    idObsRows<-which(S[[iid]]%in%idObs)
+    S <- S[idObsRows,]
+    
     ans    = funique(S[[iid]])
-    iduf   = ans$arg1  
+    iduf   = ans$arg1
     iuf    = ans$arg2
-    idnumf = ans$arg3
+    #idnumf = ans$arg3
     ans = fsort(iuf)
     ia  = ans$arg1
     ib  = ans$arg2
@@ -189,7 +232,12 @@ readDatamlx  <- function(project=NULL, datafile=NULL, header=NULL, infoProject=N
     #     else
     #       ix=NULL
   }
-  t=S[[itime]]
+  if (!is.null(itime)) {
+    t=S[[itime]]
+  }else{
+    # no time,  no regressor
+    t = 1:nrow(S) 
+  }
   nx=length(ix)
   
   nocc <- length(iocc)
@@ -274,13 +322,14 @@ readDatamlx  <- function(project=NULL, datafile=NULL, header=NULL, infoProject=N
     u <- rbind(u,u.addl)
     u <- rbind(u,u.ss)
     # u <- u[order(u$id,u$time),]
+    if(nrow(u)){
     datas   = list(treatment = u)
+    }
   }
   
   ##************************************************************************
   #       OBSERVATION FIELD
   #**************************************************************************
-  
   iobs1   = findstrcmp(S[[iy]],'.', not=TRUE)
   if (!is.null(imdv))
     iobs1 <- iobs1[S[iobs1,imdv]!=1]
@@ -289,6 +338,7 @@ readDatamlx  <- function(project=NULL, datafile=NULL, header=NULL, infoProject=N
   i0 <- c(grep(' .',S[iobs1,iy],fixed=TRUE),grep('. ',S[iobs1,iy],fixed=TRUE))
   if (length(i0)>0)
     iobs1 <- iobs1[-i0]
+  
   yvalues = data.frame(id=idnum[iobs1], time=t[iobs1], y=as.numeric(as.character(S[iobs1,iy])))
   if (!is.null(iytype)){ 
     ytype <- factor(S[iobs1,iytype])
@@ -300,10 +350,10 @@ readDatamlx  <- function(project=NULL, datafile=NULL, header=NULL, infoProject=N
     # if (length(observationName)<n.y)
     #   observationName <- paste0("y",l.ytype)
     y<- list()
-    for (iy in (1:n.y)){
-      y[[iy]] <- yvalues[ytype==l.ytype[iy],]
-      names(y[[iy]])[3] <- observationName[iy]
-      attr(y[[iy]],'type') <- "longitudinal"
+    for (in.y in (1:n.y)){
+      y[[in.y]] <- yvalues[ytype==l.ytype[in.y],]
+      names(y[[in.y]])[3] <- observationName[in.y]
+      attr(y[[in.y]],'type') <- "longitudinal"
     }
     #     yvalues$ytype <- observationName[S[[iytype]][iobs1]]
   } else {
@@ -383,6 +433,7 @@ readDatamlx  <- function(project=NULL, datafile=NULL, header=NULL, infoProject=N
     datas$id <- iduf  
     datas$N <- N
   }
+  datas$catNames<-catNames
   return(datas)
 }
 
@@ -429,7 +480,9 @@ getInfoXml  <- function (project)
   infoData                = myparseXML(xmlfile, mlxtranpath, "data")
   infoProject$datafile    = infoData[[1]]$uri
   infoProject$dataformat  = infoData[[1]]$columnDelimiter
-  infoProject$dataheader  = infoData[[1]]$headers
+  # regressor in monolixC+++ are now named REG
+  headers <- gsub("REG","X",infoData[[1]]$headers)
+  infoProject$dataheader  = headers
   ##************************************************************************
   #       GET OUTPUT INFO
   #*************************************************************************
@@ -449,6 +502,15 @@ getInfoXml  <- function (project)
   p.names <- do.call("rbind", lapply(infoParam, "[[", 1))[,1]
   p.trans <- do.call("rbind", lapply(infoParam, "[[", 2))[,1]
   infoProject$parameter <- list(name=p.names, trans=p.trans)
+  
+  infoFixedParam = myparseXML(xmlfile, mlxtranpath, "fixedParameter")
+  info.length <- unlist(lapply(infoFixedParam,length))
+  infoFixedParam <- infoFixedParam[info.length==2]
+  fixp.names <- do.call("rbind", lapply(infoFixedParam, "[[", "name"))[,1]
+  fixp.values <- do.call("rbind", lapply(infoFixedParam, "[[", "value"))[,1]
+  fixedParamValues <-as.numeric(fixp.values)
+  names(fixedParamValues) = fixp.names
+  infoProject$fixedParameters <- fixedParamValues
   
   if(file_ext(project) == "mlxtran")
   {unlink(xmlfile, recursive=T)}

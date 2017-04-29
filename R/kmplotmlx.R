@@ -8,6 +8,21 @@
 #' @param index an integer: \code{index=k} means that the survival function for the k-th event is displayed. 
 #' Default is \code{index=1}.
 #' @param level a number between 0 and 1:  confidence interval level. 
+#' @param time a vector of time points where the survival function is evaluated.
+#' @param cens if \code{TRUE} right censoring times are diplayed.
+#' @param plot if \code{TRUE} the estimated survival function is displayed, if \code{FALSE}
+#' the values are returned
+#' @param color  color to be used for the plots (default="#e05969")
+#' @param group  variable to be used for defining groups (by default, \samp{group} is used when it exists)
+#' @param facet  makes subplots for different groups if \code{TRUE} 
+#' @param labels  vector of strings 
+#' 
+#' @return 
+#' a ggplot object if \code{plot=TRUE} ; otherwise, a list with fields:
+#' \itemize{
+#'   \item \code{surv} a data frame with columns  \code{T} (time), \code{S} (survival), possibly \code{(S1, S2)} (confidence interval) and possibly \code{group} 
+#'   \item \code{cens} a data frame with columns  \code{T0} (time), \code{S0} (survival) and possibly \code{group} 
+#' }
 #' @examples
 #' \dontrun{
 #' tteModel1 <- inlineModel("
@@ -32,142 +47,340 @@
 #'   pl2  <- kmplotmlx(res2$e)
 #'   print(pl2)
 #' }
-#' @importFrom ggplot2 ggplot geom_point theme aes geom_line xlab ylab
-#' @importFrom stats qnorm
+#' @importFrom ggplot2 ggplot geom_point theme aes geom_line xlab ylab facet_wrap facet_grid
+#' @importFrom stats qnorm approx
 #' @export         
-kmplotmlx  <-  function(r, index=1, level=NULL)
+kmplotmlx  <-  function(r, index=1, level=NULL, time=NULL, cens=TRUE, plot=TRUE, 
+                        color="#e05969", group=NULL, facet=TRUE, labels=NULL)
 { 
   r.name <- attr(r,"name")
+  if (length(r.name)>1 || !any(names(r)==r.name)) {
+    if (any(names(r)=="status")) {
+      r.name <- "status"
+    } else if (any(names(r)=="event")) {
+      r.name <- "event"
+    } else {
+      dn <- setdiff(names(r),c("id","time","group",group))
+      if (length(dn)==1)
+        r.name <- dn
+    }
+  }
   names(r)[names(r)==r.name] <- "y"
   
-  N <- length(unique(r$id))
-  r0 <- r1 <- NULL
-  for (i in seq(1,N)){
-    ri <- r[r$id==i,]
-    cyi <- cumsum(ri$y)
-    ri$y <- 1
-    if (any(index<=cyi)){
-      it <- min(which(index<=cyi))
-      r1 <- rbind(r1,ri[it,]) 
-    }else{
-      di <- dim(ri)[1]
-      r0 <- rbind(r0,ri[di,])  
-    }
+  if (!is.null(r$group) & is.null(group)) {
+    group <- "group"
+  } else if (length(group)==1 && group=="none") {
+    group = NULL
   }
-  if (!is.null(r0)){
-    names(r0)[names(r0)=="y"] <- "c"
-    r0$d <- 0
-  }
-  if (!is.null(r1)){
-    names(r1)[names(r1)=="y"] <- "d"
-    r1$c <- 0
-  }
-  re <- rbind(r1,r0)
-  re <- re[with(re, order(time)), ]
   
-  if (any( "group" %in% names(re) )){
-    g=as.numeric(levels(re$group))[re$group]
-  }else{
-    g=rep(1,length(re$id))
-  }
-  ng=max(g)
-  re$id <- NULL
+  if (is.null(r$id))
+    r$id <- (1: dim(r)[1])
   
-  S <- Se <- T <- G <- NULL
-  S0 <- T0 <- G0 <- NULL
-  t0=min(r$time)
-  for (kg in seq(1,ng)){
-    rk<-re[g==kg,]
-    Nk <- dim(rk)[1]
-    ut <- uniquemlx(rk$time)
-    tu <- ut$uniqueValue
-    iu <- ut$sortIndex
-    nt <- length(tu)
-    ru <- data.frame(time=c(t0,tu),d=0,c=0)
-    nj <- Nk
-    for (j in seq(1,nt)){
-      ru$c[j+1] <- sum(rk$c[iu==j])
-      ru$d[j+1] <- sum(rk$d[iu==j])
+  if (is.data.frame(group)) {
+    attr.name <- attr(r,"name")
+    r <- merge(r,group,by="id",sort=FALSE)
+    attr(r,"name") <- attr.name
+    group <- names(group)
+    group <- group[-which(group=="id")]
+  }
+  
+  if (!is.null(labels)) {
+    if (length(group)==1) 
+      labels <- ifelse(is.list(labels),labels, list(labels))
+    for (k in (1: length(group)))
+      r[[group[k]]] <- factor(r[[group[k]]], labels=labels[[k]])
+  }
+  
+  if (!is.null(group)) {
+    ig <- interaction(r[group])
+    ig <- factor(ig)
+  } else {
+    n.tot <- dim(r)[1]
+    ig <- factor(rep(1, n.tot))
+    group <- "group"
+    r$group <- ig
+  }
+  
+  r$col <- ig
+  ug <- levels(ig)
+  ng <- length(ug)
+  
+  
+  if (!is.null(r$rep)) {
+    if (!is.null(level)) {
+      if (is.null(time)) 
+        time <- seq(min(r$time), max(r$time), length.out=100)
+      cens <- FALSE
     }
-    nj <- Nk
-    sek <- vector(length=nt+1)
-    Sk <- vector(length=nt+1)
-    Sk[1] <- 1
-    sek[1] <- 0
-    V <- 0
-    for (j in seq(2,nt+1)){
-      nj <- nj - ru$c[j-1] - ru$d[j-1]
-      pj <- (nj - ru$d[j])/nj
-      Sk[j] <- Sk[j-1]*pj
-      V <- V + ru$d[j]/nj/(nj - ru$d[j])
-      #       sek[j] <- Sk[j]*sqrt(V)
-      # sek[j] <- sqrt(V)/log(Sk[j])  # Kalbfleisch and Prentice (2002) 
-      sek[j] <- sqrt(V)/(1-Sk[j])  # logit 
-    }
-    sek[which(is.nan(sek))] <- 0
-    S <- c(S,rep(Sk,each=2))
-    S <- S[-length(S)]
-    Se <- c(Se,rep(sek,each=2))
-    Se <- Se[-length(Se)]
+  } else {
+    r$rep <- 1
+  }
+  urep <- unique(r$rep)
+  nrep <- length(urep)
+  
+  D <- D0 <- NULL
+  for (jrep in (1:nrep)) {
+    rj <- r[r$rep==urep[jrep],]
+    uid <- unique(rj$id)
+    N <- length(uid)
+    i0 <- NULL
     
-    Tk<-c(t0,rep(tu,each=2))
-    T<-c(T,Tk)
-    G<-c(G,rep(kg,2*nt+1))
+    if (is.numeric(index)) {
+      test.index <- FALSE
+      r0 <- r1 <- NULL
+      for (i in seq(1,N)) {
+        ri <- rj[rj$id==uid[i],]
+        cyi <- cumsum(ri$y)
+        if (max(cyi)>1)
+          test.index <- TRUE
+        ri$y <- 1
+        if (any(index<=cyi)) {
+          it <- min(which(index<=cyi))
+          r1 <- rbind(r1,ri[it,]) 
+        } else {
+          di <- dim(ri)[1]
+          r0 <- rbind(r0,ri[di,])  
+        }
+      }
+      if (!is.null(r0)) {
+        names(r0)[names(r0)=="y"] <- "c"
+        r0$d <- 0
+      }
+      if (!is.null(r1)) {
+        names(r1)[names(r1)=="y"] <- "d"
+        r1$c <- 0
+      }
+      re <- rbind(r1,r0)
+      re <- re[with(re, order(time)), ]
+      
+      g=re$col
+      
+      re$id <- NULL
+      
+      S <- Se <- T <- G <- NULL
+      S0 <- T0 <- G0 <- NULL
+      t0=min(rj$time)
+      if (min(rj$time[rj$y==1]) < min(rj$time[rj$y==0]))
+        t0 <- 0
+      for (kg in ug) {
+        rk<-re[g==kg,]
+        Nk <- dim(rk)[1]
+        ut <- uniquemlx(rk$time)
+        tu <- ut$uniqueValue
+        iu <- ut$sortIndex
+        nt <- length(tu)
+        ru <- data.frame(time=c(t0,tu),d=0,c=0)
+        nj <- Nk
+        for (j in seq(1,nt)) {
+          ru$c[j+1] <- sum(rk$c[iu==j])
+          ru$d[j+1] <- sum(rk$d[iu==j])
+        }
+        nj <- Nk
+        sek <- vector(length=nt+1)
+        Sk <- vector(length=nt+1)
+        Sk[1] <- 1
+        sek[1] <- 0
+        V <- 0
+        for (j in seq(2,nt+1)) {
+          nj <- nj - ru$c[j-1] - ru$d[j-1]
+          pj <- (nj - ru$d[j])/nj
+          Sk[j] <- Sk[j-1]*pj
+          V <- V + ru$d[j]/nj/(nj - ru$d[j])
+          sek[j] <- sqrt(V)/(1-Sk[j])  # logit 
+        }
+        sek[which(is.nan(sek))] <- 0
+        
+        if (is.null(time)) {
+          S <- c(S,rep(Sk,each=2))
+          S <- S[-length(S)]
+          Se <- c(Se,rep(sek,each=2))
+          Se <- Se[-length(Se)]
+          Tk<-c(t0,rep(tu,each=2))
+        } else {
+          Sa <- approx(x=c(t0,tu),y=Sk,xout=time, rule=1)$y
+          sea <- approx(x=c(t0,tu),y=sek,xout=time, rule=1)$y
+          S <- c(S,Sa)
+          Se <- c(Se,sea)
+          Tk<-time
+        }
+        T<-c(T,Tk)
+        jk1 <- which(ig==kg)[1]
+        Gk <- r[group][rep(jk1,length(Tk)),]
+        if (!is.data.frame(Gk)) {
+          Gk <- data.frame(Gk)
+          names(Gk) <- names(r[group])
+        }
+        G <- rbind(G,Gk)
+        
+        if (cens) {
+          i0 <- which(ru$c>0)
+          if (length(i0)>0) {
+            T0 <- c(T0,ru$time[i0])
+            S0 <- c(S0,Sk[i0])
+            G0k <- r[group][rep(jk1,length(i0)),]
+            if (!is.data.frame(G0k)) {
+              G0k <- data.frame(G0k)
+              names(G0k) <- names(r[group])
+            }
+            G0 <- rbind(G0, G0k)
+          }
+        }
+      }
+    } else if (index=="numberEvent") {
+      #g <- as.numeric(levels(rj$col)[rj$col])
+      g <- rj$col
+      t0=min(rj$time)
+      S <- T <- G <- NULL
+      for (kg in ug) {
+        rk<-rj[g==kg,]
+        uidk <- unique(rk$id)
+        Nk <- dim(rk)[1]
+        ut <- sort(unique(c(t0,rk$time)))
+        nt <- length(ut)
+        cy <- cw <- 0
+        for (i in uidk) {
+          ri <- rj[rj$id==i,]
+          cyi <- completemlx(xi=cumsum(ri$y),ti=ri$time,t=ut)
+          cy <- cy + cyi$x*cyi$w
+          cw <- cw + cyi$w
+        } 
+        cy <- cy/cw
+        
+        if (is.null(time)) {
+          Sk <- rep(cy,each=2)
+          S <- c(S,Sk[-length(Sk)])
+          Tk <- rep(ut,each=2)
+          Tk <- Tk[-1]
+        } else {
+          Sa <- approx(x=ut,y=cy,xout=time, rule=1)$y
+          S <- c(S,Sa)
+          Tk<-time
+        }
+        T<-c(T,Tk)
+        jk1 <- which(ig==kg)[1]
+        Gk <- r[group][rep(jk1,length(Tk)),]
+        if (!is.data.frame(Gk)) {
+          Gk <- data.frame(Gk)
+          names(Gk) <- names(r[group])
+        }
+        G <- rbind(G,Gk)
+      }
+      
+    } else {
+      cat("\nindex should be an integer of the string 'numberEvent'\n")
+      return()
+    }
     
-    i0 <- which(ru$c>0)
-    if (length(i0)>0){
-      T0 <- c(T0,ru$time[i0])
-      S0 <- c(S0,Sk[i0])
-      G0 <- c(G0, rep(kg, length(i0) ))
+    Dk <- data.frame(time=T,S)
+    if (plot==TRUE | ng>1) 
+      Dk <- cbind(G, Dk)
+    if (nrep>1)
+      Dk <- cbind(data.frame(rep=factor(jrep)), Dk)
+    if (!is.null(level)) {
+      alpha <- (1-level)/2
+      s1 <- log(S/(1-S)) + Se*qnorm(alpha)  # logit 
+      s2 <- log(S/(1-S)) + Se*qnorm(1-alpha)
+      nan.s1 <- which(is.nan(s1))
+      nan.s2 <- which(is.nan(s2))
+      s1[is.nan(s1)] <- s1[nan.s1-1]
+      s2[is.nan(s2)] <- s2[nan.s2-1]
+      Dk$S1 <- 1/(1+exp(-s1))
+      Dk$S2 <- 1/(1+exp(-s2))
+    }
+    D <- rbind(D, Dk)
+    
+    if (exists("T0")  && !is.null(T0)) {
+      D0k <- data.frame(time=T0,S0)
+      if (plot==TRUE | ng>1) 
+        D0k <- cbind(G0, D0k)
+      if (nrep>1)
+        D0k$rep <- factor(jrep)
+      D0 <- rbind(D0, D0k)
     }
     
   }
   
-  group=factor(G)
-  if (!is.null(level)){
-    alpha <- (1-level)/2
-    #  S1 <- pmax(S + Se*qnorm(alpha),0)
-    #  S2 <- pmin(S + Se*qnorm(1-alpha),1)
-    #     s1 <- log(-log(S)) + Se*qnorm(alpha)  # Kalbfleisch and Prentice (2002) 
-    #     s2 <- log(-log(S)) + Se*qnorm(1-alpha)
-    #     S1 <- exp(-exp(s1))
-    #     S2 <- exp(-exp(s2))
-    s1 <- log(S/(1-S)) + Se*qnorm(alpha)  # logit 
-    s2 <- log(S/(1-S)) + Se*qnorm(1-alpha)
-    S1 <- 1/(1+exp(-s1))
-    S2 <- 1/(1+exp(-s2))
-    D=data.frame(T,S,S1,S2,group)
-  }else{
-    D=data.frame(T,S,group)
-  }
+  S1 <- S2 <- Dgrep <- NULL
   
-  
-  plot1=ggplotmlx(data=D) +  geom_line(aes(x=T, y=S, colour=group), size=1)
-  if (!is.null(level)){
-    plot1=plot1+geom_line(aes(x=T, y=S1, colour=group), linetype="dotted", size=0.8) +
-      geom_line(aes(x=T, y=S2, colour=group), linetype="dotted", size=0.8)
-  }
-  plot1 <- plot1 + xlab("time") + ylab("survival") 
-  if (length(i0)>0){
-    group <- factor(G0)
-    D0 <- data.frame(T0,S0,group)
-    plot1 <- plot1 + geom_point(data=D0, aes(x=T0,y=S0, colour=group), size=4)
-  }
-  if (ng>1){
-    plot1 <- plot1 + theme(legend.position=c(0.1,0.15))
-  }else{
+  if (plot==TRUE) {
+    if (facet==TRUE) {
+      if (nrep==1) {
+        plot1=ggplotmlx(data=D) +  geom_line(aes(x=time, y=S), color=color, size=1)
+      } else {
+        plot1=ggplotmlx(data=D) +  geom_line(aes(x=time, y=S, group=rep), color=color, size=1)
+      }
+      if (!is.null(level)){
+        plot1=plot1+geom_line(data=D,aes(x=time, y=S1), linetype="dotted", color=color, size=0.8) +
+          geom_line(data=D,aes(x=time, y=S2), linetype="dotted", color=color, size=0.8)
+      }
+      
+    } else {
+      D$group <- interaction(D[group])
+      if (nrep==1) {
+        plot1=ggplotmlx() +  geom_line(data=D, aes(x=time, y=S, color=group), size=1)
+      } else {
+        D$Dgrep <- interaction(D$group,D$rep)
+        plot1 <- ggplotmlx() +  geom_line(data=D, aes(x=time, y=S, colour=group, group=Dgrep), size=1)
+       }
+      if (!is.null(level)){
+        if (nrep==1) {
+          plot1=plot1+geom_line(data=D, aes(x=time, y=S1, colour=group), linetype="dotted", size=0.8) +
+            geom_line(data=D, aes(x=time, y=S2, colour=group), linetype="dotted", size=0.8)
+        } else {
+          plot1=plot1+geom_line(data=D, aes(x=time, y=S1, colour=group, group=Dgrep), linetype="dotted", size=0.8) +
+            geom_line(data=D, aes(x=time, y=S2, colour=group, group=Dgrep), linetype="dotted", size=0.8)
+        }
+      }
+    }
+    
+    if (index=="numberEvent") {
+      plot1 <- plot1 + xlab("time") + ylab("mean number of events per individual") 
+    } else if (test.index==FALSE) {
+      plot1 <- plot1 + xlab("time") + ylab("survival") 
+    } else {
+      plot1 <- plot1 + xlab("time") + ylab(paste0("survival (event number ", index, ")" ))
+    }
+    
+    if (exists("S0") && !is.null(S0)) {
+      if (facet==TRUE) {
+        plot1 <- plot1 + geom_point(data=D0, aes(x=time,y=S0), color=color, size=3)
+      } else {
+        D0$group <- interaction(D0[group])
+        plot1 <- plot1 + geom_point(data=D0, aes(x=time,y=S0, colour=group), size=3)
+      }
+    }
+    
     plot1 <- plot1 + theme(legend.position="none")
-  }  
-  return(plot1)
+    
+    if (ng>1) {
+      if (facet==TRUE) {
+        if (length(group)==1) 
+          plot1 <- plot1 + facet_wrap(group)
+        if (length(group)==2) 
+          plot1 <- plot1 + facet_grid(paste(group[1],"~",group[2]))
+      } else {
+        plot1 <- plot1 + theme(legend.justification=c(0,0), legend.position=c(0.05,0.1))
+      }
+    }
+    
+    res <- plot1
+  } else {
+    res <- list(surv=D, cens=D0)
+  }
+  return(res)
 }
 
 
-
-#--------------------------------------------------------
-uniquemlx <- function(x) 
-{ 
-  d <- !duplicated(x) 
-  u=list(uniqueValue=x[d], firstIndex=which(d), sortIndex=match(x,x[d])) 
-  return(u)
+completemlx <- function(xi,ti,t) {
+  nt <- length(t)
+  nti <- length(ti)
+  x <- rep(xi[nti],nt)
+  for (k in (1: (nti-2))) {
+    itk <- which( t>=ti[k] & t < ti[k+1])
+    x[itk] <- xi[k]
+  }
+  w <- rep(1,nt)
+  if (xi[nti]==0)
+    w[which(t>ti[nti])] <- 0
+  return(list(w=w, x=x))
 }
-
