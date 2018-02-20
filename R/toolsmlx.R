@@ -12,7 +12,7 @@ funique <- function(A){
   #   [C,IA,IC] = unique(A) also returns index vectors IA and IC such that
   #   C = A(IA) and A = C(IC).  
   #
-  # [C,IA,IC]= unique( A , 'first' );
+  # [C,IA,IC]= unique( A , 'first' )
   C  <- unique( A )
   # IA <- match(data.frame(t(C)), data.frame(t(A)))
   # IC <- match(data.frame(t(A)), data.frame(t(C)))
@@ -116,8 +116,7 @@ mklist <- function(x, add.name=T)
 }
 
 
-dpopid <- function(x,s)
-{
+dpopid <- function(x,s) {
   n <- length(x)
   r <- list(name=s,j=NULL,id=NULL,N=NULL,pop=NULL,npop=NULL)
   for (k in (1:n)) {
@@ -136,6 +135,7 @@ dpopid <- function(x,s)
       }
       
       if (!is.null(xk$id)) {
+        xk$id <- factor(xk$id, levels=unique(xk$id))
         idk <- levels(factor(xk$id))
         r$id <- unique(c(r$id,idk))
         r$j <- c(r$j,k)
@@ -143,7 +143,7 @@ dpopid <- function(x,s)
       if (!is.null(xk$pop)){
         r$npop <- unique(c(r$npop,length(unique(xk$pop))))
         if (length(r$npop)>1)
-          stop(paste('Different numbers of populations are defined in ',s))
+          stop(paste('Different numbers of populations are defined in ',s), call.=FALSE)
         r$pop <- c(r$pop,k)
       }
     } 
@@ -253,7 +253,7 @@ select.data  <- function(data)
           if (is.null(select.id)) {
             select.id <- unique(datak$id)
           } else {
-            select.id <- intersect(select.id , unique(datak$id))
+            select.id <- union(select.id , unique(datak$id))
           }
         } 
       } else {
@@ -264,7 +264,7 @@ select.data  <- function(data)
               if (is.null(select.id)) {
                 select.id <- unique(datam$id)
               } else {
-                select.id <- intersect(select.id , unique(datam$id))
+                select.id <- union(select.id , unique(datam$id))
               }
             } 
           }
@@ -274,18 +274,14 @@ select.data  <- function(data)
   }
   if (!is.null(select.id)) {
     if (length(select.id)==0)
-      stop("\nPlease check the id's... The selection of the id's for the different inputs of simulx is not consistent: the intersection is empty!\n")
+      stop("\nPlease check the id's... The selection of the id's for the different inputs of simulx is not consistent: the intersection is empty!\n", call.=FALSE)
     N <- nlevels(select.id)
-    for  (j in (1:length(data)))
-    {
+    for  (j in (1:length(data))) {
       dataj <- data[[j]]
-      for  (k in (1:length(dataj)))
-      {
+      for  (k in (1:length(dataj))) {
         datak <- dataj[[k]]
-        if (is.data.frame(datak))
-        {
-          if (!is.null(datak$id))
-          {
+        if (is.data.frame(datak)) {
+          if (!is.null(datak$id)) {
             idk <- which(datak$id %in% select.id)
             data[[j]][[k]] <- datak[idk,]
           } 
@@ -316,6 +312,7 @@ modify.mlxtran <- function(model, addlines)
   con     <- file(model, open = "r")
   lines   <- readLines(con, warn=FALSE)
   close(con)
+  lines <- gsub("\\;.*","",lines)
   
   if (!is.list(addlines[[1]]))
     addlines <- list(addlines)
@@ -349,8 +346,11 @@ rct.mlxtran <- function(model, addlines)
   con     <- file(model, open = "r")
   lines   <- readLines(con, warn=FALSE)
   close(con)
+  lines <- gsub("\\;.*","",lines)
+  test.w <- FALSE
   i1 <- grep("event", lines)
   if (length(i1)>0) {
+    test.w <- TRUE
     lines[i1] <- gsub(" ","",lines[i1])
     for (k in (1:length(i1))) {
       ik1 <- i1[k]
@@ -360,13 +360,21 @@ rct.mlxtran <- function(model, addlines)
         lk <- lines[ik1:ik2]
         if (length(grep("rightCensoringTime", lk))==0) {
           if (length(grep("maxEventNumber", lk))==0) 
-            stop("Right censoring time should be defined for repeated events, when there is no maximum number of events")
+            stop("Right censoring time should be defined for repeated events, when there is no maximum number of events", call.=FALSE)
           lines[ik1] <- gsub("type=event","type=event, rightCensoringTime=1e10",lk[1])
         }
         if (length(grep("intervalCensored", lk))>0 & length(grep("intervalLength", lk))==0) 
-          stop("Interval length should be defined when events are interval censored")
+          stop("Interval length should be defined when events are interval censored", call.=FALSE)
       }
     }
+  }
+  i1 <- grep("correlation", lines)
+  if (length(i1)>0) {
+    test.w <- TRUE
+    lines[i1] <- gsub(" ","",lines[i1])
+    lines[i1] <- gsub("level=id,","",lines[i1])
+  }
+  if (test.w) {
     model <- "temp_model.txt"
     write(lines,model)
   }
@@ -375,7 +383,7 @@ rct.mlxtran <- function(model, addlines)
 
 repCategories <- function(r, model) {
   categories <- NULL
-  lines <- splitModel(model,"LONGITUDINAL")[[1]]$model
+  lines <- splitModel(model,"LONGITUDINAL")[[1]]$lines
   if (!is.null(lines)) {
     ldef  <- grep("DEFINITION:",lines, fixed=TRUE)
     if (length(ldef)>0) {

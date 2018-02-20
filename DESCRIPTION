@@ -1,6 +1,6 @@
 Package: mlxR
 Type: Package
-Version: 3.2.0
+Version: 3.3.0
 Title: Simulation of Longitudinal Data
 Description: Simulation and visualization of complex
     models for longitudinal data. The models are encoded using the model coding
@@ -10,8 +10,7 @@ Description: Simulation and visualization of complex
     including mixed effects models, for continuous, count, categorical, and
     time-to-event data.
 Authors@R: c(
-    person( "Marc", "Lavielle", role = c("aut","cre"), email = "Marc.Lavielle@inria.fr" ), 
-    person( "Raphael", "Kuate", role = "ctb", email = "raphael.kuate@inria.fr")
+    person( "Marc", "Lavielle", role = c("aut","cre"), email = "Marc.Lavielle@inria.fr" )
     )
 URL: http://simulx.webpopix.org
 BugReports: https://github.com/MarcLavielle/mlxR/issues
@@ -23,9 +22,8 @@ License: BSD_2_clause + file LICENSE
 Copyright: Inria
 RoxygenNote: 6.0.1
 NeedsCompilation: no
-Packaged: 2017-04-27 20:58:15 UTC; Marc
-Author: Marc Lavielle [aut, cre],
-  Raphael Kuate [ctb]
+Packaged: 2018-02-20 11:50:29 UTC; Marc
+Author: Marc Lavielle [aut, cre]
 Maintainer: Marc Lavielle <Marc.Lavielle@inria.fr>
 Repository: CRAN
-Date/Publication: 2017-04-29 15:46:49 UTC
+Date/Publication: 2018-02-20 11:56:41 UTC

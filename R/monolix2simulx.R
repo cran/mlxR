@@ -39,6 +39,7 @@ monolix2simulx <-function(project,parameter=NULL,group=NULL,open=FALSE,r.data=TR
                             model=NULL,
                             treatment=NULL,
                             parameter=parameter,
+                            regressor=NULL,
                             output=NULL,
                             group=group,
                             r.data=r.data,
@@ -52,6 +53,7 @@ monolix2simulx <-function(project,parameter=NULL,group=NULL,open=FALSE,r.data=TR
   occasion      <- ans$occ
   fim           <- ans$fim
   catNames      <- ans$catNames
+  catNames.iov      <- ans$catNames.iov
   mlxtranpath <- dirname(project)
   mlxtranfile = file_path_sans_ext(basename(project))
   mypath <- getwd()
@@ -70,7 +72,8 @@ monolix2simulx <-function(project,parameter=NULL,group=NULL,open=FALSE,r.data=TR
   mlxtranfile = file_path_sans_ext(basename(project))
   projectExe <- file.path(RprojectPath,paste0(mlxtranfile,".R"))
   cat(paste0("# File generated automatically on ", Sys.time(),"\n \n"), file =projectExe, fill = FALSE, labels = NULL,append = TRUE)
-  cat("library(mlxR)  \n \nsetwd(dirname(parent.frame(2)$ofile)) \n\n# model \n", file =projectExe, fill = FALSE, labels = NULL, append = TRUE)
+#  cat("library(mlxR)  \n \nsetwd(dirname(parent.frame(2)$ofile)) \n\n# model \n", file =projectExe, fill = FALSE, labels = NULL, append = TRUE)
+  cat(paste0("\nsetwd(\"",RprojectPath,"\")"),"\n\n# model \n", file =projectExe, fill = FALSE, labels = NULL, append = TRUE)
   cat(paste0("model<-\"",modelname,"\"\n"), file =projectExe, fill = FALSE, labels = NULL, append = TRUE)
   
   # write  treatment 
@@ -85,9 +88,22 @@ monolix2simulx <-function(project,parameter=NULL,group=NULL,open=FALSE,r.data=TR
     cat("trt <- read.table(\"treatment.txt\", header = TRUE) \n", file =projectExe, fill = FALSE, labels = NULL, append = TRUE)
   }
   
+  param.list <- NULL
+  # occasion    
+  if(!(is.null(occasion))) {  
+    cat("\n# occasion \n", file =projectExe, fill = FALSE, labels = NULL, append = TRUE)
+    outfile = file.path(Rproject,paste0("/occasion.txt"))      
+    write.table(occasion,file=outfile,row.names=FALSE,quote=FALSE)
+    cat(paste0("occasion <-read.table(\"occasion.txt\", header = TRUE)\n"),file =projectExe, fill = FALSE, labels = NULL, append = TRUE)             
+
+    # cat(paste0("cov.occ <- occasion\n"), file =projectExe, fill = FALSE, labels = NULL, append = TRUE)             
+    # cat(paste0("names(cov.occ)[3] <- \"OCC\"\n"), file =projectExe, fill = FALSE, labels = NULL, append = TRUE)             
+    # cat(paste0("cov.occ[,3]<- as.factor(cov.occ[,3])"), file =projectExe, fill = FALSE, labels = NULL, append = TRUE)             
+    # param.list <- "cov.occ"
+  }
+  
   # write  parameters   
   if(!(is.null(parameter))){  
-    param.list <- NULL
     cat("\n# parameters \n", file =projectExe, fill = FALSE, labels = NULL, append = TRUE)
     
     if (!is.null(ans$id)){
@@ -110,9 +126,13 @@ monolix2simulx <-function(project,parameter=NULL,group=NULL,open=FALSE,r.data=TR
     
     individualCovariate <- parameter[[2]]
     if (!is.null(individualCovariate)){
-      outfile = file.path(Rproject,paste0("/individualCovariate.txt"))  
-      if(!is.null(catNames)){
+      indcov <- "individualCovariate"
+      if (!is.null(occasion)) 
+        indcov <- paste0(indcov, "IIV")
       
+      outfile = file.path(Rproject,paste0("/",indcov,".txt"))  
+      if(!is.null(catNames)){
+        
         cat(paste0("colCatType<-rep(NA,",ncol(individualCovariate),")\n"),file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
         catNamesCols <-which(colnames(individualCovariate)%in%catNames)
         cat(paste0("catNamesCols<-c(",catNamesCols[1]),file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
@@ -121,20 +141,47 @@ monolix2simulx <-function(project,parameter=NULL,group=NULL,open=FALSE,r.data=TR
         }
         cat(")\n", file =projectExe, fill = FALSE, labels = NULL, append = TRUE)
         cat(paste0("colCatType[catNamesCols]<-rep(\"character\",",length(catNames),")\n"),file =projectExe, fill = FALSE, labels = NULL, append = TRUE)
-        cat(paste0("individualCovariate<- read.table('individualCovariate.txt', header = TRUE,colClasses = colCatType) \n"), file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
+        cat(paste0(indcov," <- read.table('",indcov,".txt', header = TRUE,colClasses = colCatType) \n"), file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
       }else{
-        cat(paste0("individualCovariate<- read.table('individualCovariate.txt', header = TRUE) \n"), file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
+        cat(paste0(indcov," <- read.table('",indcov,".txt', header = TRUE) \n"), file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
       }
       write.table(individualCovariate,file=outfile,row.names=FALSE,quote=FALSE)
       if (!is.null(param.list))
-        param.list <- paste(param.list,"individualCovariate",sep=",")  
+        param.list <- paste(param.list,indcov,sep=",")  
       else
-        param.list <- "individualCovariate"
+        param.list <- indcov
       i.factor <- which(sapply(individualCovariate[-1], is.factor))
-      if (length(i.factor)>0){
-        cat(paste0("individualCovariate[,",i.factor+1,"]<- as.factor(individualCovariate[,",i.factor+1,"]) \n"), file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
-      }
+      if (length(i.factor)>0)
+        cat(paste0(indcov,"[,",i.factor+1,"]<- as.factor(",indcov,"[,",i.factor+1,"]) \n"), file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
     } 
+    
+    if (length(parameter)>=4) {
+      individualCovariate.iov <- parameter[[4]]
+      if (!is.null(individualCovariate.iov)){
+        outfile = file.path(Rproject,paste0("/individualCovariateIOV.txt"))  
+        if(!is.null(catNames.iov)){
+          
+          cat(paste0("colCatType<-rep(NA,",ncol(individualCovariate.iov),")\n"),file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
+          catNamesCols.iov <-which(colnames(individualCovariate.iov)%in%catNames.iov)
+          cat(paste0("catNamesCols<-c(",catNamesCols.iov[1]),file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
+          for(i in seq(2,length(catNames.iov))){
+            cat(paste0(",",catNamesCols.iov[i]), file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
+          }
+          cat(")\n", file =projectExe, fill = FALSE, labels = NULL, append = TRUE)
+          cat(paste0("colCatType[catNamesCols]<-rep(\"character\",",length(catNames.iov),")\n"),file =projectExe, fill = FALSE, labels = NULL, append = TRUE)
+          cat(paste0("individualCovariateIOV <- read.table('individualCovariateIOV.txt', header = TRUE,colClasses = colCatType) \n"), file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
+        }else{
+          cat(paste0("individualCovariateIOV <- read.table('individualCovariateIOV.txt', header = TRUE) \n"), file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
+        }
+        write.table(individualCovariate.iov,file=outfile,row.names=FALSE,quote=FALSE)
+        param.list <- paste(param.list,"individualCovariateIOV",sep=",")  
+        i.factor <- which(sapply(individualCovariate.iov[-1], is.factor))
+        if (length(i.factor)>0){
+          cat(paste0("individualCovariateIOV[,",i.factor+1,"]<- as.factor(individualCovariateIOV[,",i.factor+1,"]) \n"), file =projectExe, fill = FALSE, labels = NULL, append = TRUE) 
+        }
+      }
+    }
+    
     individualParameter <- parameter[[3]]
     if (!is.null(individualParameter)){
       outfile = file.path(Rproject,paste0("/individualParameter.txt"))      
@@ -200,13 +247,6 @@ monolix2simulx <-function(project,parameter=NULL,group=NULL,open=FALSE,r.data=TR
     cat(paste0("regressor <-read.table(\"regressor.txt\", header = TRUE)\n"),file =projectExe, fill = FALSE, labels = NULL, append = TRUE)             
   }
   
-  # occasion    
-  if(!(is.null(occasion))) {  
-    cat("\n# occasion \n", file =projectExe, fill = FALSE, labels = NULL, append = TRUE)
-    outfile = file.path(Rproject,paste0("/occasion.txt"))      
-    write.table(occasion,file=outfile,row.names=FALSE,quote=FALSE)
-    cat(paste0("occasion <-read.table(\"occasion.txt\", header = TRUE)\n"),file =projectExe, fill = FALSE, labels = NULL, append = TRUE)             
-  }
   
   # call the simulator
   cat("\n# call the simulator \n", file =projectExe, fill = FALSE, labels = NULL, append = TRUE)
