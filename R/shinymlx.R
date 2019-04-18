@@ -13,7 +13,7 @@
 #' value for \code{numeric}.
 #'
 #' See http://simulx.webpopix.org/mlxr/shinymlx/ for more details.      
-#' @param model a \code{Mlxtran} or \code{PharmML} model used for the simulation
+#' @param model a \code{Mlxtran} model used for the simulation
 #' @param output a list - or a list of lists - with fields: 
 #' \itemize{
 #'   \item \code{name}: a vector of output names
@@ -31,6 +31,21 @@
 #' Input argument of Simulx can also be used,  i.e. a list with fields \code{time}, 
 #' \code{amount}, \code{rate}, \code{tinf}, \code{type}, \code{target}.
 #' 
+#' @param regressor a list, or a list of lists, with fields
+#' \itemize{
+#'   \item \code{name} : a vector of regressor names,
+#'   \item \code{time} : a vector of times,
+#'   \item \code{value} : a vector of values.
+#' }
+#' @param group a list, or a list of lists, with fields: 
+#' \itemize{
+#'   \item \code{size} : size of the group (default=1),
+#'   \item \code{level} : level(s) of randomization,
+#'   \item \code{parameter} : if different parameters per group are defined,
+#'   \item \code{output} : if different outputs per group are defined,
+#'   \item \code{treatment} : if different treatements per group are defined,
+#'   \item \code{regressor} : if different regression variables per group are defined.
+#' }
 #' @param data a datafile to display with the plot
 #' @param title the title of the application
 #' @param appname the name of the application (and possibly its path)
@@ -90,8 +105,8 @@
 #' }
 #' @importFrom utils read.csv
 #' @export         
-shinymlx <- function(model,parameter=NULL,output=NULL,treatment=NULL,
-                     data=NULL,appname="shinymlxApp",style="basic",
+shinymlx <- function(model,parameter=NULL,output=NULL,treatment=NULL,regressor=NULL,
+                     group=NULL, data=NULL,appname="shinymlxApp",style="basic",
                      settings=NULL,title=" ")
 {
   
@@ -110,6 +125,7 @@ shinymlx <- function(model,parameter=NULL,output=NULL,treatment=NULL,
   s2f <- ""
   unlink(file.path(mainDir=appname), recursive = TRUE, force = TRUE)
   dir.create(file.path(mainDir=appname), showWarnings = FALSE)
+  save(regressor, group, file=file.path(appname,"data.RData"))
   if (is.list(model)) 
     write(model$str, file.path(appname,"model.txt"))
   else 
@@ -141,12 +157,16 @@ shinymlx <- function(model,parameter=NULL,output=NULL,treatment=NULL,
       "    r <- simulx( model     = 'model.txt',
                  treatment = adm,
                  parameter = p,
+                 regressor = regressor,
+                 group     = group,
                  output    = f)
 ")    
   }else{
     s3 <- (
       "    r <- simulx( model     = 'model.txt',
                  parameter = p,
+                 regressor = regressor,
+                 group     = group,
                  output    = f)
 ")    
     treatment <- NULL
@@ -219,8 +239,12 @@ ftreatment <- function(trt){
             trtk[[j]] <- list(value=pj, widget="numeric")
           else if (nk[j]=="target")
             trtk[[j]] <- list(value=pj, widget="none")
-          else
+          else if (pj>0)
             trtk[[j]] <- list(value=pj, min=pj/2, max=pj*2, step=pj*0.1, widget="slider")
+          else if (pj<0)
+            trtk[[j]] <- list(value=pj, min=pj*2, max=pj/2, step=-pj*0.1, widget="slider")
+          else 
+            trtk[[j]] <- list(value=0, min=-1, max=1, step=0.1, widget="slider")
         }else if (("ii" %in% nk) & (length(pj)==4)){
           trtk[[j]] <- list(value=pj[1], min=pj[2], max=pj[3], step=pj[4], widget="slider")        
         }else{
@@ -233,14 +257,16 @@ ftreatment <- function(trt){
   return(trt)
 }
 
-fparameter <- function(param) 
-{
-  if (!is.null(names(param))){  
-    param=list(param) 
-  } 
+fparameter <- function(param) {
+  if (!is.null(names(param))) {
+    if (!any(names(param) %in% c("numeric", "slider",  "none" )))
+      param=list(param) 
+  }
+  if (is.null(names(param)))  names(param) <- "slider"
+  names(param)[which(names(param)=="")] <- "slider"
   for (k in seq(1,length(param))){
     paramk <- param[[k]]
-    if (is.list(paramk)){
+    if (is.list(paramk)) {
       if (!is.null(paramk$value)){
         pk <- paramk$value
         names(pk) <- paramk$name
@@ -249,19 +275,31 @@ fparameter <- function(param)
     }
     if (!is.list(paramk)){
       paramk <- as.list(paramk)
-      for (j in (1:length(paramk)))
-        paramk[[j]] <- c(1,0.5,2,0.1)*paramk[[j]]
+      if (identical(names(param)[k], "slider")) {
+        for (j in (1:length(paramk))) {
+          pj <- paramk[[j]]
+           if (pj>0)
+             paramk[[j]] <- c(1,0.5,2,0.1)*pj
+          else if (pj<0)
+            paramk[[j]] <- c(1,2,0.5,-0.1)*pj
+          else 
+            paramk[[j]] <- c(0,-1,1,0.1)
+        }
+      }
     }
-    for (j in (1: length(paramk))){
+    for (j in (1: length(paramk))) {
       pj <- paramk[[j]]
       if (!is.list(pj)){
-        if (length(pj)==1){
+        if (identical(names(param)[k], "slider")) {
+          if (length(pj)==4) 
+            paramk[[j]] <- list(value=pj[1], min=pj[2], max=pj[3], step=pj[4], widget="slider")
+          else 
+            stop("Error:  length of a parameter defined as a vector should be 4 (slider), or 1 (constant)")
+        } else if (identical(names(param)[k], "numeric")) {
+          paramk[[j]] <- list(value=pj, widget="numeric")
+        } else {      
           paramk[[j]] <- list(value=pj, widget="none")
-        }else if (length(pj)==4){
-          paramk[[j]] <- list(value=pj[1], min=pj[2], max=pj[3], step=pj[4], widget="slider")
-        }else{
-          stop("Error:  length of a parameter defined as a vector should be 4 (slider), or 1 (constant)")
-        }        
+        }
       }
     }
     param[[k]] <- paramk
@@ -724,6 +762,7 @@ serverTemplate <- function(s, select, i.output, select.y)
     'library("mlxR")
 library("gridExtra")
 source("shinymlxTools.R")
+load("data.RData")
 
 ',s[1],'
 nf <- length(f)

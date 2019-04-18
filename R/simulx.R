@@ -1,6 +1,6 @@
 #' Simulation of mixed effects models and longitudinal data
 #'
-#' Compute predictions and sample data from \code{Mlxtran}, \code{R} and \code{PharmML} models
+#' Compute predictions and sample data from \code{Mlxtran} and \code{R} models
 #' 
 #' simulx takes advantage of the modularity of hierarchical models for simulating 
 #' different components of a model: models for population parameters, individual 
@@ -9,14 +9,14 @@
 #' Furthermore, \code{simulx} allows to draw different types of longitudinal data, 
 #' including continuous, count, categorical, and time-to-event data.
 #' 
-#' The models are encoded using either the model coding language \samp{Mlxtran}, \samp{R} or the 
-#' markup language \samp{PharmML}. \samp{Mlxtran} models are automatically converted into C++ codes, 
+#' The models are encoded using either the model coding language \samp{Mlxtran}, or \samp{R}. 
+#' \samp{Mlxtran} models are automatically converted into C++ codes, 
 #' compiled on the fly and linked to R using the \samp{Rcpp} package. 
 #' That allows one to implement very easily complex models and to take advantage 
 #' of the numerical sovers used by the C++ \samp{mlxLibrary}.
 #' 
 #' See http://simulx.webpopix.org for more details.      
-#' @param model a \code{Mlxtran}, \code{R} or \code{PharmML} model used for the simulation
+#' @param model a \code{Mlxtran}, or \code{R} model used for the simulation
 #' @param parameter a vector of parameters with their names and values
 #' @param output a list (or list of lists) with fields: 
 #' \itemize{
@@ -81,6 +81,7 @@
 #'   \item \code{disp.iter} : TRUE/FALSE (default = FALSE) display replicate and population numbers
 #'   \item \code{replacement} : TRUE/FALSE (default = FALSE) sample id's with/without replacement
 #'   \item \code{out.trt} : TRUE/FALSE (default = TRUE) output of simulx includes treatment
+#'   \item \code{format.original} : TRUE/FALSE (default = FALSE) with a Monolix project, write data in result.file using the original format of the data file
 #' }       
 #' 
 #' @return A list of data frames. Each data frame is an output of simulx
@@ -128,33 +129,41 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   #  the CeCILL license as circulated by CEA, CNRS and INRIA at the following URL
   #  http://www.cecill.info/index.en.html
   #
-  #  simulx.R was developed by Marc Lavielle and the Inria popix team for the DDMoRe project. 
+  #  simulx.R was developed by Marc Lavielle and the Inria popix and Xpop teams. 
   #--------------------------------------------------
   
-  myOldENVPATH = Sys.getenv('PATH');
-  initMlxLibrary()
-  session=Sys.getenv("session.simulx")
-  # if (!is.null(varlevel) && grepl('MonolixSuite2016R1',session)) {
-  #   cat("\nvarlevel is not supported with this version of mlxLibrary\n")
-  #   return()
-  # }
-  Sys.setenv(LIXOFT_HOME=session)
+  # !! RETRO-COMPTATIBILITY ========================================================== !!
+  if (!.useLixoftConnectors()) # < 2019R1
+    myOldENVPATH = Sys.getenv('PATH')
+  else if (!.checkLixoftConnectorsAvailibility()) # >= 2019R1
+    return()
+  # !! =============================================================================== !!
   
-  if (is.null(settings$seed))
-    settings$seed <-  round(as.numeric(Sys.time())*1000*runif(1))%%1e11/100
+  if (!initMlxR())
+    return()
+  
+  # !! RETRO-COMPTATIBILITY ========================================================== !!
+  useLixoftConnectors <- .useLixoftConnectors()
+  
+  if (!useLixoftConnectors){ # < 2019R1
+    session = Sys.getenv("session.simulx")
+    Sys.setenv(LIXOFT_HOME = session)
+  }
+  # !! =============================================================================== !!  
+  
+  
+  r <- simulx.check(model=model,parameter=parameter,output=output,treatment=treatment,regressor=regressor, 
+                    varlevel=varlevel, group=group, data=data,project=project,settings=settings)
+  
+  for (r.field in names(r)) {eval(parse(text=paste0(r.field,"=r$",r.field)))}
   
   set.seed(settings$seed)
   disp.iter <- ifelse((!is.null(settings$disp.iter) && settings$disp.iter==TRUE), TRUE, FALSE)
   sep <- settings$sep
-  if (is.null(settings$sep)) sep <- ","
   digits <- settings$digits
-  if (is.null(settings$digits)) digits <- 5
   kw.max <- settings$kw.max
-  if (is.null(settings$kw.max)) kw.max <- 500
   replacement <- settings$replacement
-  if (is.null(settings$replacement)) replacement <- FALSE
   out.trt <- settings$out.trt
-  if (is.null(settings$out.trt))  out.trt <- TRUE
   
   if (!is.null(data)) {
     imodel.inline <- FALSE
@@ -163,16 +172,28 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
       data$model <- data$model$filename
       imodel.inline <- TRUE
     }
+    if (!is.null(data$individual_parameters))
+      data$individual_parameters$value <- matrix(data$individual_parameters$value, nrow=nrow(data$individual_parameters$value))
     r <- simulxunit(data=data,settings=settings,riov=NULL)
     if (imodel.inline==TRUE)
       file.remove(data$model)
-    Sys.setenv(LIXOFT_HOME="")
-    Sys.setenv('PATH'=myOldENVPATH);
+    
+    # !! RETRO-COMPTATIBILITY ======================================================== !!
+    if (!useLixoftConnectors){ # < 2019R1
+      Sys.setenv(LIXOFT_HOME = "")
+      Sys.setenv('PATH' = myOldENVPATH); 
+    }
+    # !! ============================================================================= !!    
+    
     return(r)
+    
   }
   
-  if (isfield(settings,"record.file"))  
-    warning("\n\n 'record.file' is a deprecated option. Use 'result.file' instead.")
+  # if (any(sapply(parameter,is.character))) {
+  #   iop_indiv=1
+  # } else {
+  #   iop_indiv=0
+  # }
   
   
   #--------------------------------------------------
@@ -183,8 +204,6 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   imodel.inline <- FALSE
   if (is.list(model)) {
     imodel.inline <- TRUE
-    # if (!is.null(settings$data.in) && settings$data.in)
-    #   imodel.inline <- FALSE
     if (imodel.inline==TRUE) {
       write(model$str, model$filename)
       model <- model$filename
@@ -202,20 +221,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   }
   
   #--------------------------------------------------
-  # MODEL ->  PROJECT
-  if (identical(file_ext(model),"mlxtran")) {
-    lines <- readLines(model)
-    data.test <-  grep('<DATAFILE>', lines, fixed=TRUE, value=TRUE)
-    if (length(data.test)) {
-      project <- model
-      model <- NULL
-      warning(paste0("\n\n'",project,"' was recognized as a Monolix project. Use \n","> simulx(project = '",project,"',...)"))
-    }
-  }
-  
-  #--------------------------------------------------
   #     reshape inputs
-  #--------------------------------------------------
   group     <- mklist(group)
   parameter <- mklist(parameter, add.name = FALSE)
   treatment <- mklist(treatment)
@@ -274,7 +280,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   names(stat.a)=stat.n
   names(loq.a)=loq.n
   
-  
+  iop_indiv <- 0
   #--------------------------------------------------
   #     Monolix project
   #--------------------------------------------------
@@ -296,8 +302,8 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
                                regressor=regressor,
                                output=output,
                                group=group,
-                               fim=fim
-    )
+                               fim=fim,
+                               format.original=settings$format.original)
     ans <- select.data(ans)
     model     <- ans$model
     treatment <- ans$treatment
@@ -308,6 +314,8 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     varlevel  <- ans$occasion
     fim       <- ans$fim
     infoParam <- ans$infoParam
+    iop_indiv <- ans$iop_indiv
+    format.original  <- ans$format.original
     id        <- as.factor(ans$id$oriId)
     N         <- nlevels(id)
     test.pop <- FALSE
@@ -335,27 +343,46 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     id <- NULL
     test.N <- FALSE
     test.pop <- FALSE
+    if (!is.null(group)) {
+      fy <- function(y) any(unlist(lapply(y, function(x) {'id' %in% names(x)})))
+      if (any(unlist(lapply(group, fy))))  test.N <- TRUE
+    }
     for (k in (1:length(l.input))) {
       lk <- l.input[k]
       eval(parse(text=paste0('pk <- ',lk))) 
       pk<- dpopid(pk,lk)
       if (!is.null(pk$N)) {
         test.N <- TRUE
-        if (!is.null(pk$id)) 
+        if (!is.null(pk$id))
           id <- unique(c(id, pk$id))
       }
       if (!is.null(pk$npop)) {
         test.pop <- TRUE
         npop <- unique(c(npop,pk$npop))
-        if (length(npop)>1)
-          stop('\n\nDifferent numbers of populations are defined in different inputs', call.=FALSE)
       }
       popid[[k]] <- pk
+    }
+    if (!is.null(id)) {
+      l.input <- c('parameter', 'regressor', 'varlevel')
+      for (k in (1:length(l.input))) {
+        lk <- l.input[k]
+        eval(parse(text=paste0('pk <- ',lk))) 
+        pk<- dpopid(pk,lk)
+        if (!is.null(pk$id) & !identical(id, pk$id))
+          stop(paste0("Some id's are missing in '",lk,"'"), call.=FALSE)
+      }
     }
     if (test.N==TRUE)
       id <- as.factor(id)
     N <- length(id)
   }
+  
+  if (!Rmodel ) {
+    r <- commentModel(model, parameter, test.project)
+    model <- r$model
+    test.project <- r$test.project
+  }
+  
   #--------------------------------------------------
   #     variability levels
   #--------------------------------------------------
@@ -377,11 +404,19 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     parameter <- parameter[sapply(parameter,length)>0]
     r <- param.iov(parameter, varlevel)
     parameter <- r$param
-    riov <- translateIOV(model, names.varlevel, nocc, output, r$iov, r$cat)
-    if (test.project)
+    if (iop_indiv==0) {
+      riov <- translateIOV(model, names.varlevel, nocc, output, r$iov, r$cat)
+      if (test.project)
+        file.remove(model)
+      model <- riov$model
+      output <- outiov(output,riov$iov,varlevel,r$iov)
+    } else {
+      riov <- translateIOVind(model, names.varlevel, nocc, r$iov)
       file.remove(model)
-    model <- riov$model
-    output <- outiov(output,riov$iov,varlevel,r$iov)
+      model <- riov$model
+      output <- outiov(output,r$iov,varlevel,r$iov)
+     # riov <- NULL
+    }
     regressor <- c(regressor, varlevel)
     varlevel <- NULL
   } else 
@@ -394,7 +429,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
       paramk <- parameter[[k]]
       if (isfield(paramk,"pop")) {
         if (isfield(paramk,"id"))
-          stop("\n\n Both 'id' and 'pop' cannot be defined in the same data frame", call.=FALSE)
+          stop("Both 'id' and 'pop' cannot be defined in the same data frame", call.=FALSE)
         npop <- nrow(paramk)
         paramk$pop <- NULL
         parameter[[k]] <- paramk[1,]
@@ -430,15 +465,15 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
       stop("'size' is missing in group", call.=FALSE)
     g.size <- sapply(group, function(x) x$size)
     if (any(sapply(group, function(x) !is.null(x$level))))
-      warning("\n\n'level' in group is ignored when id's are defined in the inputs of simulx", call.=FALSE)
+      warning("'level' in group is ignored when id's are defined in the inputs of simulx", call.=FALSE)
     ng <- length(group)
     if (ng==1) {
       if (!identical(names(group[[1]]),'size'))
-        stop("\n\nOnly 'size' can be defined in group when a single group is created and when id's are defined in the inputs of simulx", call.=FALSE)
+        stop("Only 'size' can be defined in group when a single group is created and when id's are defined in the inputs of simulx", call.=FALSE)
     } else {
       u.name <- unique(unlist(sapply(group, function(x) names(x))))
       if (!all(u.name %in% c("size","treatment", "regressor")))
-        stop("\n\nOnly 'size', 'treatment' and 'regressor' can be defined in group when several groups are created and when id's are defined in the inputs of simulx", call.=FALSE)
+        stop("Only 'size', 'treatment' and 'regressor' can be defined in group when several groups are created and when id's are defined in the inputs of simulx", call.=FALSE)
       if ("treatment" %in% u.name) {
         tr <- NULL
         i2 <- 0
@@ -467,26 +502,26 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
         # nreg <- length(group[[1]]$regressor)
         # lv$regressor <- list()
         # for (jr in 1:nreg) {
-          tr <- NULL
-          i2 <- 0
-          for (k in (1:ng)) {
-            i1 <- i2+1
-            i2 <- i2 + group[[k]]$size
-#            grk <- group[[k]]$regressor[[jr]]
-            grk <- group[[k]]$regressor
-            tk <- as.data.frame(grk[c('time','value')])
-            names(tk)[2] <- grk$name
-            ntk <- nrow(tk)
-            tk <- tk[rep(seq.int(1,ntk), group[[k]]$size), ]
-            tk$id <- rep(seq(i1,i2),each=ntk)
-            if (is.null(tr))
-              tr <- tk
-            else
-              tr <- merge(tr,tk, all=TRUE, sort=FALSE)
-          }
-          tr[is.na(tr)]='.'
-#          lv$regressor[[jr]] <- tr
-          lv$regressor <- tr
+        tr <- NULL
+        i2 <- 0
+        for (k in (1:ng)) {
+          i1 <- i2+1
+          i2 <- i2 + group[[k]]$size
+          #            grk <- group[[k]]$regressor[[jr]]
+          grk <- group[[k]]$regressor
+          tk <- as.data.frame(grk[c('time','value')])
+          names(tk)[2] <- grk$name
+          ntk <- nrow(tk)
+          tk <- tk[rep(seq.int(1,ntk), group[[k]]$size), ]
+          tk$id <- rep(seq(i1,i2),each=ntk)
+          if (is.null(tr))
+            tr <- tk
+          else
+            tr <- merge(tr,tk, all=TRUE, sort=FALSE)
+        }
+        tr[is.na(tr)]='.'
+        #          lv$regressor[[jr]] <- tr
+        lv$regressor <- tr
       }
       # }
       gr.ori <- NULL
@@ -610,6 +645,9 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
           app <- FALSE
         else
           app <- TRUE
+        if (settings$format.original) 
+          r[['format.original']] <- format.original
+        
         writeDatamlx(r,result.folder=result.folder,result.file=result.file,
                      sep=sep,digits=digits,app.dir=app,app.file=app)
         
@@ -617,11 +655,11 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
       if (irep==1) {
         res <- rs
       } else {
-        for(k in (1:length(rs)))
-          if (is.data.frame(rs[[k]]))
-            res[[k]] <- rbind(res[[k]],rs[[k]])
+        for(nk in (names(rs)))
+          if (is.data.frame(rs[[nk]])) 
+            res[[nk]] <- rbind(res[[nk]],rs[[nk]])
           else
-            res[[k]] <- rs[[k]]
+            res[[nk]] <- rs[[nk]]
       }  
     } # irep
     
@@ -651,11 +689,16 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     } 
   }
   
+  if (settings$format.original) {
+    R.complete$result.file <- result.file
+    R.complete$headerTypes <- format.original$infoProject$dataheader
+  }
+  
   pop <- NULL
   if (test.pop == TRUE) {
     pop <- as.data.frame(pop.mat)
-    pop <- format(pop, digits = 5, justify = "left")
-    pop <- cbind(pop=(1:npop),pop)
+    #pop <- format(pop, digits = 5, justify = "left")
+    pop <- cbind(pop=as.factor(1:npop),pop)
   } else if (!(is.null(project))) {
     pop <- parameter[[1]]
   }
@@ -667,8 +710,14 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     R.complete$population <- pop
   }
   
-  Sys.setenv(LIXOFT_HOME="")
-  Sys.setenv('PATH'=myOldENVPATH);
+  # !! RETRO-COMPTATIBILITY - < 2019R1 =============================================== !!
+  if (!useLixoftConnectors){
+    Sys.setenv(LIXOFT_HOME = "")
+    Sys.setenv('PATH' = myOldENVPATH);  
+  }
+  # !! =============================================================================== !!  
+  
+  
   # For categorical output, returns the categories defined in the model, instead of {0, 1, ...}
   if (!Rmodel)
     R.complete <- repCategories(R.complete, model)
@@ -705,16 +754,8 @@ simulxunit <- function(model=NULL, lv=NULL, data=NULL, settings=NULL, out.trt=TR
     #--------------------------------------------------
     #    MODEL
     #--------------------------------------------------
-    if (!(is.null(model))) {
-      if(model=="pkmodel") {
-        model = generateModelFromPkModel(lv$parameter[[1]],lv$output[[1]]) 
-      } else {
-        model_ext <- file_ext(model)
-        if(model_ext=="xml"){
-          model = pharmml2mlxtran(model)
-        }
-      }
-    }
+    if (model=="pkmodel")
+      model = generateModelFromPkModel(lv$parameter[[1]],lv$output[[1]])
     
     dataIn <- list()    
     
@@ -757,12 +798,21 @@ simulxunit <- function(model=NULL, lv=NULL, data=NULL, settings=NULL, out.trt=TR
   }
   if (identical(file_ext(model),"R")) {Rfile <- TRUE} else {Rfile <- FALSE}
   if ( !is.null(model) && exists(model, mode="function") ){Rsource <- TRUE} else {Rsource <- FALSE}
+  
+  dataOut <- NULL
   if (Rfile || Rsource){
+    
     dataOut <- simulR(argList)
     return(dataOut)
-  }else{
-    dot_call <- .Call
-    dataOut  <- dot_call( "mlxComputeR", argList, PACKAGE = "mlxComputeR" )
+    
+  } else {
+
+    if (.useLixoftConnectors()) # >= 2019R1
+      .hiddenCall('dataOut <- lixoftConnectors::computeSimulations(dataIn, s)')
+    else # < 2019R1 ================================================================== !!
+      .hiddenCall('dataOut <- .Call("mlxComputeR", argList, PACKAGE = "mlxComputeR")')
+    # !! ============================================================================= !!
+    
     if(data.in==TRUE)
       return(dataIn)
     if (!exists("gr.ori"))
@@ -773,10 +823,12 @@ simulxunit <- function(model=NULL, lv=NULL, data=NULL, settings=NULL, out.trt=TR
         id.ori <- data.frame(newId=(1:length(id.ori)), oriId=id.ori)
       dataOut$originalId <- id.ori
     }
-    
-    if (!is.null(riov)) dataOut <- dataOutiov(dataOut,riov)
+    if (!is.null(riov)) 
+      dataOut <- dataOutiov(dataOut,riov)
     return(dataOut)
+  
   }
+  
 }
 
 dataOutiov <- function(d,r) {

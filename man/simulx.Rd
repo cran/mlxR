@@ -4,14 +4,15 @@
 \alias{simulx}
 \title{Simulation of mixed effects models and longitudinal data}
 \usage{
-simulx(model = NULL, parameter = NULL, output = NULL, treatment = NULL,
-  regressor = NULL, varlevel = NULL, group = NULL, data = NULL,
-  project = NULL, nrep = 1, npop = NULL, fim = NULL,
-  result.folder = NULL, result.file = NULL, stat.f = "statmlx",
-  addlines = NULL, settings = NULL)
+simulx(model = NULL, parameter = NULL, output = NULL,
+  treatment = NULL, regressor = NULL, varlevel = NULL,
+  group = NULL, data = NULL, project = NULL, nrep = 1,
+  npop = NULL, fim = NULL, result.folder = NULL,
+  result.file = NULL, stat.f = "statmlx", addlines = NULL,
+  settings = NULL)
 }
 \arguments{
-\item{model}{a \code{Mlxtran}, \code{R} or \code{PharmML} model used for the simulation}
+\item{model}{a \code{Mlxtran}, or \code{R} model used for the simulation}
 
 \item{parameter}{a vector of parameters with their names and values}
 
@@ -92,13 +93,14 @@ simulx(model = NULL, parameter = NULL, output = NULL, treatment = NULL,
   \item \code{disp.iter} : TRUE/FALSE (default = FALSE) display replicate and population numbers
   \item \code{replacement} : TRUE/FALSE (default = FALSE) sample id's with/without replacement
   \item \code{out.trt} : TRUE/FALSE (default = TRUE) output of simulx includes treatment
+  \item \code{format.original} : TRUE/FALSE (default = FALSE) with a Monolix project, write data in result.file using the original format of the data file
 }}
 }
 \value{
 A list of data frames. Each data frame is an output of simulx
 }
 \description{
-Compute predictions and sample data from \code{Mlxtran}, \code{R} and \code{PharmML} models
+Compute predictions and sample data from \code{Mlxtran} and \code{R} models
 }
 \details{
 simulx takes advantage of the modularity of hierarchical models for simulating 
@@ -108,8 +110,8 @@ covariates, individual parameters and longitudinal data.
 Furthermore, \code{simulx} allows to draw different types of longitudinal data, 
 including continuous, count, categorical, and time-to-event data.
 
-The models are encoded using either the model coding language \samp{Mlxtran}, \samp{R} or the 
-markup language \samp{PharmML}. \samp{Mlxtran} models are automatically converted into C++ codes, 
+The models are encoded using either the model coding language \samp{Mlxtran}, or \samp{R}. 
+\samp{Mlxtran} models are automatically converted into C++ codes, 
 compiled on the fly and linked to R using the \samp{Rcpp} package. 
 That allows one to implement very easily complex models and to take advantage 
 of the numerical sovers used by the C++ \samp{mlxLibrary}.

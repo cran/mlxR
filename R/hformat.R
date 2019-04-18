@@ -103,7 +103,8 @@ hformat  <-  function(list.input)
         else if(isfield(lvkj,"design")) {
           lvkj$design$id <- match(lvkj$design$id, id)
           Nid <- c(Nid,lvkj$design$id)
-          lv[[k]][[j]]=lvkj
+          if (!is.null(lvkj))
+            lv[[k]][[j]]=lvkj
         }
         else if(isfield(lvkj,"time")) {
           if (!isfield(lvkj$time,"id") & isfield(lvkj$time,"ID") ) {
@@ -124,7 +125,8 @@ hformat  <-  function(list.input)
         if (isfield(lvkj,'colNames')) {
           Nid=c(Nid,lvkj$value[,1]) #assuming that first column = id
         }
-        lv[[k]][[j]]=lvkj
+        if (!is.null(lvkj))
+          lv[[k]][[j]]=lvkj
       }
     }
   }    
@@ -212,8 +214,7 @@ hformat  <-  function(list.input)
   
   #---  regressor
   iv <- which(nv=="regressor")
-  if (!is.null(lv[[iv]]))
-  {
+  if (!is.null(lv[[iv]])) {
     r <- format.regressor(lv[[iv]],seq(1,N))
     if (length(r$id)>0) 
       id.ori=c(id.ori,r$id)
@@ -279,8 +280,10 @@ format.treatment <- function(treatment,uN) {
       trtk=pp
     } else if (!is.data.frame(trtk)) {
       trtk <- as.data.frame(trtk,stringsAsFactors =FALSE)
-      if (is.null(trtk$time) | (is.null(trtk$amount) & is.null(trtk$amt)) )
-        stop("\n\nBoth 'time' and 'amount' should be defined in a treatment list\n", call.=FALSE)
+      if (is.null(trtk$time))
+        stop("'time' should be defined in a treatment list\n", call.=FALSE)
+      if (is.null(trtk$amount) & is.null(trtk$amt))
+        trtk$amt <- 0
       n <- nrow(trtk)
       trtk <- trtk[rep(1:n,each=N),] 
       trtk$id <- rep(uN,n)
@@ -300,16 +303,21 @@ format.treatment <- function(treatment,uN) {
     names(trtk)[names(trtk)=="adm"] <- "type"
     
     if (!is.null(trtk$rate)) {
-      trtkrate=rep(Inf,length(trtk$rate))
-      irate <- (trtk$rate!=".")
-      trtkrate[irate]=as.numeric(as.character(trtk$rate[irate]))
+      irate <- !is.na(trtk$rate)
+      jrate <- trtk$rate[irate] !="."
+      
+      trtkrate = rep(Inf,length(trtk$rate))
+      trtkrate[irate][jrate] = as.numeric(as.character(trtk$rate[irate][jrate]))
       trtk$rate <- trtkrate
     }
     if (!is.null(trtk$tinf)) {
       names(trtk)[names(trtk)=="tinf"] <- "rate"
-      trtkrate=rep(Inf,length(trtk$rate))
-      irate <- trtk$rate!="."
-      trtkrate[irate]=trtk$amount[irate]/as.numeric(as.character(trtk$rate[irate]))
+      
+      irate <- !is.na(trtk$rate)
+      jrate <- trtk$rate[irate] !="."
+      
+      trtkrate=  rep(Inf,length(trtk$rate))
+      trtkrate[irate][jrate] = trtk$amount[irate][jrate] / as.numeric(as.character(trtk$rate[irate][jrate]))
       trtk$rate <- trtkrate
     }
     if (is.null(trtk$rate))
@@ -396,15 +404,21 @@ format.parameter <- function(parameter,param,uN) {
           id.ori<-c(id.ori,idk) 
           paramk$id <- match(paramk$id, idk)
         }
+        p.chr <- which(unlist(lapply(paramk,is.character)))
+        for (jch in seq_len(length(p.chr)))
+          paramk[[p.chr[jch]]] <- as.factor(paramk[[p.chr[jch]]])
+        if (length(p.chr) >0)
+          warning(paste0(c("parameters/covariates ", names(p.chr), " have been converted to factors"), collapse = " "), call. = FALSE)
       }
     }
     for (i in uN) {
-      pki <- paramk[paramk$id==i,]
+      pki <- subset(paramk, id==i)
       pki$id <- i
       if (is.null(parameter[[i]]))
         parameter[[i]] <- pki
       else
-        parameter[[i]] <- merge(parameter[[i]],pki)
+        parameter[[i]][names(pki)]=pki
+#        parameter[[i]] <- merge(parameter[[i]],pki)
     }
   }
   r <- list(parameter=parameter, id=unique(id.ori))
@@ -506,6 +520,9 @@ format.regressor <- function(reg, uN) {
         mk <- regk$value
         colNames=regk$colNames
       } else {
+        if (length(regk$time)==1) {
+          regk$time <- c(regk$time, regk$time)
+        }
         nk <- length(regk$time)
         idk <- rep(uN,each=nk)
         mk <- cbind(regk$time,regk$value)
@@ -522,7 +539,7 @@ format.regressor <- function(reg, uN) {
       regk <- mk
     }
     regk <- regk[order(regk$id,regk$time),]
-    regressor[[k]] <- regk
+    regressor[[k]] <- unique(regk)
   }
   r <- list(regressor=regressor, id=unique(id.ori))
   return(r)
