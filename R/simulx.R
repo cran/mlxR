@@ -139,7 +139,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     return()
   # !! =============================================================================== !!
   
-  if (!initMlxR())
+  if (!initMlxR()$status)
     return()
   
   # !! RETRO-COMPTATIBILITY ========================================================== !!
@@ -164,6 +164,8 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   kw.max <- settings$kw.max
   replacement <- settings$replacement
   out.trt <- settings$out.trt
+  
+  remove.model <- remove.model0 <- FALSE
   
   if (!is.null(data)) {
     imodel.inline <- FALSE
@@ -207,6 +209,8 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     if (imodel.inline==TRUE) {
       write(model$str, model$filename)
       model <- model$filename
+      remove.model <- TRUE
+      remove.model0 <- TRUE
     }
   }
   
@@ -415,7 +419,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
       file.remove(model)
       model <- riov$model
       output <- outiov(output,r$iov,varlevel,r$iov)
-     # riov <- NULL
+      # riov <- NULL
     }
     regressor <- c(regressor, varlevel)
     varlevel <- NULL
@@ -450,8 +454,12 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
   
   # For time to event output, add a right censoring time = 1e10 if missing
   # remove level=id from correlation definitions
-  if (!Rmodel)
+  if (!Rmodel) {
+    model0 <- model
     model <- rct.mlxtran(model)
+    if (!identical(model, model0))
+      remove.model <- TRUE
+  }
   
   #--------------------------------------------------
   lv <- list(treatment=treatment,
@@ -472,7 +480,7 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
         stop("Only 'size' can be defined in group when a single group is created and when id's are defined in the inputs of simulx", call.=FALSE)
     } else {
       u.name <- unique(unlist(sapply(group, function(x) names(x))))
-      if (!all(u.name %in% c("size","treatment", "regressor")))
+      if (!all(u.name %in% c("size","treatment", "regressor", "level")))
         stop("Only 'size', 'treatment' and 'regressor' can be defined in group when several groups are created and when id's are defined in the inputs of simulx", call.=FALSE)
       if ("treatment" %in% u.name) {
         tr <- NULL
@@ -530,7 +538,6 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
       lv$gr.ori <- as.factor(gr.ori)
     }
   }
-  
   if (is.null(N)) N<-1
   if (is.null(npop)) npop<-1
   
@@ -716,8 +723,6 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     Sys.setenv('PATH' = myOldENVPATH);  
   }
   # !! =============================================================================== !!  
-  
-  
   # For categorical output, returns the categories defined in the model, instead of {0, 1, ...}
   if (!Rmodel)
     R.complete <- repCategories(R.complete, model)
@@ -728,6 +733,14 @@ simulx <- function(model=NULL, parameter=NULL, output=NULL,treatment=NULL,
     else if (!is.null(riov))
       file.remove(riov$model)
   }
+  if(settings$data.in)
+    remove.model <- remove.model0 <- FALSE
+  
+  if (remove.model && file.exists(model))
+    file.remove(model)
+  if (remove.model0 && file.exists(model0))
+    file.remove(model0)
+  
   
   return(R.complete)
 }
@@ -806,7 +819,7 @@ simulxunit <- function(model=NULL, lv=NULL, data=NULL, settings=NULL, out.trt=TR
     return(dataOut)
     
   } else {
-
+    
     if (.useLixoftConnectors()) # >= 2019R1
       .hiddenCall('dataOut <- lixoftConnectors::computeSimulations(dataIn, s)')
     else # < 2019R1 ================================================================== !!
@@ -826,7 +839,7 @@ simulxunit <- function(model=NULL, lv=NULL, data=NULL, settings=NULL, out.trt=TR
     if (!is.null(riov)) 
       dataOut <- dataOutiov(dataOut,riov)
     return(dataOut)
-  
+    
   }
   
 }

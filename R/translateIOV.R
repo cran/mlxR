@@ -137,6 +137,7 @@ line2field <- function(str) {
     rv <- sub(".*\\=","",sp)
     nv <- lapply(rv, function(x) sum(gregexpr("\\{",x)[[1]]>0))
     lrv <- as.list(rv)
+    
     iv1 <- which(nv==1)
     if (length(iv1)>0) {
       riv1 <- gsub(".*?\\{(.*?)\\}.*", "\\1", rv[iv1])
@@ -161,6 +162,8 @@ line2field <- function(str) {
             j2 <- regexpr("\\,",substr(rvi2,j1+1,ni2))+j1-1
           if (j2>=j1)
             lrvi2 <- c(lrvi2, substr(rvi2,j1,j2))
+          else
+            lrvi2 <- c(lrvi2, substr(rvi2,j1,ni2))
         }
         lrv[[iv2]] <- lrvi2
       }
@@ -267,6 +270,7 @@ splitSection  <-  function(section) {
 iovin <- function(lines, c.iov=NULL, v.iov=NULL, nocc, name, cat=NULL, rem.name=NULL) {
   # duplicates the list of variables with IOV in the input list
   
+  
   if (!is.null(rem.name)) {
     vc <- sub("\\=.*","",lines)
     lines <- lines[!(vc %in% rem.name)]
@@ -287,10 +291,15 @@ iovin <- function(lines, c.iov=NULL, v.iov=NULL, nocc, name, cat=NULL, rem.name=
   if (length(lines)==0)
     return(list(iov=NULL, lines=name))
   
+  
   suffix <- "_iov"
   sep <- "([\\,\\{\\}])"
   vi <- c()
   v.iov <- setdiff(v.iov,rem.name)
+  
+  l.input <- grep("input", lines)
+  if (length(v.iov)==1 && l.input %in% grep(v.iov,lines) && length(grep("\\{", lines[l.input]))==0)
+    lines[l.input] <- paste0("input={",v.iov,"}")
   
   for (expr in c.iov) {
     nexpr0 <- paste0(expr,"0")
@@ -456,7 +465,7 @@ iovdef <- function(lines, v.iov=NULL, nocc) {
   iop.sd <- (length(grep("sd=",lines))>0) 
   fields <- line2field(lines)
   if (length(lines)==1) fields <- list(fields)
-    
+  
   i.iov <- which(sapply(fields, function(x) !is.null(x$fields$varlevel)))
   vcv <- list()
   for (k in (1:length(fields))) {
@@ -524,6 +533,35 @@ iovdef <- function(lines, v.iov=NULL, nocc) {
     d.iov <- NULL
   }
   new.lines <- gsub("no-variability=no-variability","no-variability",new.lines)
+  
+  #---   transform correlations at the iov level into correlations at the iiv level
+  l.cor <- grep("id\\*occ",new.lines)
+  if (length(l.cor)>0) {
+    lk.cor <- NULL
+    for (i in l.cor) {
+      li.cor0 <- new.lines[i]
+      li.cor0 <- gsub("id\\*occ", "id", li.cor0)
+      vi1 <- gregexpr("\\(", li.cor0)[[1]] 
+      vi2 <- gregexpr("\\)", li.cor0)[[1]]
+      nv1 <- length(vi1)
+      li.cor <- NULL
+      for (ko in (1:nocc)) {
+        li.cork <- li.cor0
+        for (ji in seq_len(nv1)) {
+          i1 <- vi1[nv1-ji+1]
+          i2 <- vi2[nv1-ji+1]
+          str12 <- substr(li.cork, start=i1, stop=i2)
+          isep <- regexpr(",", str12) 
+          viov <- c(substring(str12,first=2,last=isep-1),substring(str12,first=isep+1, last=nchar(str12)-1))
+          li.cork <- gsub(str12,paste0("(eta_",viov[1],suffix,ko,", ","eta_",viov[2],suffix,ko,")"),li.cork, fixed=TRUE)
+        }
+        lk.cor <- c(lk.cor, li.cork )
+      }
+    }
+    new.lines <- new.lines[-l.cor] 
+    new.lines <- c(new.lines, lk.cor)
+  }
+  
   return(list(iov=v.iov,d.iov=d.iov,lines=new.lines))
 }
 
@@ -681,8 +719,8 @@ param.iov <- function(p, occ) {
   p2 <- p2[sapply(p2,length)>0]
   for (j in seq_len(length(cat))) {
     cj <- grep("[\\+\\-\\*<>]",cat[[j]]$categories)
-      if (length(cj)>0)
-        cat[[j]]$categories[cj] <- paste0("'",cat[[j]]$categories[cj],"'")
+    if (length(cj)>0)
+      cat[[j]]$categories[cj] <- paste0("'",cat[[j]]$categories[cj],"'")
   }
   return(list(param=p2, iov=v.iov, cat=cat))
 }

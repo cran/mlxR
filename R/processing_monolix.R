@@ -30,11 +30,11 @@ processing_monolix  <- function(project,model=NULL,treatment=NULL,parameter=NULL
   # id.input <- as.factor(id.input)
   # id.input <- as.factor(unique(unlist(idt[which(!unlist(lapply(idt, is.null)))])))
   for (k2 in seq_len(length(id2))) {
-    if (!is.null(id2[[k2]]) & !identical(id.input, id2[[k2]]))
+    if (!is.null(id2[[k2]]) & !identical(id.input, unique(id2[[k2]])))
       stop(paste0("Some id's are missing in 'parameter'"), call.=FALSE)
   }
   for (k3 in seq_len(length(id3))) {
-    if (!is.null(id3[[k3]]) & !identical(id.input, id3[[k3]]))
+    if (!is.null(id3[[k3]]) & !identical(id.input, unique(id3[[k3]])))
       stop(paste0("Some id's are missing in 'regressor'"), call.=FALSE)
   }
   
@@ -79,6 +79,16 @@ processing_monolix  <- function(project,model=NULL,treatment=NULL,parameter=NULL
       datas$parameter <- readIndEstimate(infoProject$resultFolder,param[which(sapply(param,is.character))])
     else if (any(sapply(param,is.data.frame))) {
       datas$parameter <- param[[which(sapply(param,is.data.frame))]]
+      
+      icat <- which(names(datas$parameter) %in% datas$catNames)
+      if (length(icat)>0) {
+        for (ijcat in names(datas$parameter)[icat]) {
+          datas$parameter[[ijcat]] <- factor(as.character(datas$parameter[[ijcat]]), levels(datas$covariate[[ijcat]]) )
+     if (any(is.na(datas$parameter[[ijcat]])))
+       stop(paste("Some values of", ijcat, "do not match the levels of this covariate"), call.=FALSE)
+        }
+      }
+      
       n.diff <- setdiff(names(datas$covariate), names(datas$parameter))
       if (length(n.diff)>0) {
         if (is.null(datas$parameter$id))
@@ -117,7 +127,7 @@ processing_monolix  <- function(project,model=NULL,treatment=NULL,parameter=NULL
       }
       if (!is.null(datas$regressor$id)) {
         datas$regressor <- subset(datas$regressor, id %in% id.input)
-        if (nrow(datas$regressor$value) == 0) datas$regressor <- NULL
+        if (!is.null(datas$regressor$value) && nrow(datas$regressor$value) == 0) datas$regressor <- NULL
       }
     }
     
@@ -248,15 +258,23 @@ processing_monolix  <- function(project,model=NULL,treatment=NULL,parameter=NULL
         model = file.path(mlxtranpath,paste0(mlxtranfile,"_simulxModel.txt"))
         write(lines,model)
         
-      } else if (initMlxR()){ # init mlxR package if needed
+      } else if (initMlxR()$status){ # init mlxR package if needed
         
         mlxtranfile = file_path_sans_ext(basename(project))
         mlxtranpath <- dirname(project)
         
         if (.useLixoftConnectors()){ # >= 2019R1
           
-          model = file.path(normalizePath(mlxtranpath),paste0(mlxtranfile,"_simulxModel.txt"))
+     #     model = file.path(normalizePath(mlxtranpath),paste0(mlxtranfile,"_simulxModel.txt"))
+          model = paste0(mlxtranfile,"_simulxModel.txt")
+         dmlx <- dir(normalizePath(mlxtranpath))
+          dmlx0 <- dmlx[grep(paste0(mlxtranfile,"_model"), dmlx)]
           .hiddenCall('lixoftConnectors::writeProjectModelSection(project, model)')
+          dmlx <- dir(normalizePath(mlxtranpath))
+          dmlx1 <- dmlx[grep(paste0(mlxtranfile,"_model"), dmlx)]
+          dmlx01 <- setdiff(dmlx1,dmlx0)
+          if (length(dmlx01)>0)
+            file.remove(file.path(normalizePath(mlxtranpath),dmlx01))
           
         } else { # !! < 2019R1 ======================================================= !!
           
@@ -1052,7 +1070,7 @@ transPatch <- function(model) {
 
 getProjectInformation <- function(project){
   
-  if (!initMlxR())
+  if (!initMlxR()$status)
     return(NULL)
   
   projectInfo = list(datafile = NULL, dataformat = NULL, dataheader = NULL, output = NULL, resultFolder = NULL, mlxtranpath = NULL);
@@ -1105,6 +1123,22 @@ getProjectInformation <- function(project){
     paramTrans <-as.vector(dataOut$individualParameters)
     paramTrans <- transformationsAlias(paramTrans)
     projectInfo$parameter <- list(name=paramNames, trans=paramTrans)
+    if (any(paramTrans=="G")) {
+      op0 <- options()
+      op1 <- op0
+      op1$lixoft_notificationOptions$warnings <- 1
+      op1$lixoft_notificationOptions$info <- 1
+      options(op1)
+      gip <- NULL
+      .hiddenCall('lixoftConnectors::initializeLixoftConnectors(software="monolix", force=TRUE)')
+      .hiddenCall('lixoftConnectors::initializeLixoftConnectors(software="monolix", force=TRUE)')
+      .hiddenCall('lixoftConnectors::loadProject(project)')
+      .hiddenCall('gip <- lixoftConnectors::getIndividualParameterModel()')
+      projectInfo$parameter$limits <- gip$limits
+      .hiddenCall('lixoftConnectors::initializeLixoftConnectors(software="simulx", force=TRUE)')
+      options(op0)
+    }
+    
     
   }
   
