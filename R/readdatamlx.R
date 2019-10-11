@@ -38,24 +38,24 @@
 readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10, obs.rows=FALSE,
                          datafile=NULL, header=NULL, infoProject=NULL, addl.ss=NULL){
   id <- NULL
-  observationName <- NULL
+  observationModelName <- NULL
   datas=NULL
   
   if (!is.null(addl.ss)) 
     warning("addl.ss is deprecated. Use nbSSDoses instead.", call. = FALSE)
   if (!is.null(nbSSDoses))
     addl.ss <- nbSSDoses 
-    
-
+  
+  
   if (!is.null(project)){
-      
+    
     if (!file.exists(project)) 
       stop(paste0("The Monolix project ", file.path(getwd(),project), " does not exists..."), call.=FALSE)
-      
+    
     infoProject <- getProjectInformation(project)
     if (is.null(infoProject))
       stop("The project could not be loaded properly", call.=FALSE)
-      
+    
     r= tryCatch(
       readPopEstimate(infoProject$resultFolder)
       , error=function(e) {
@@ -63,12 +63,14 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
       }      
     )    
     datas$populationParameters <- r$param
-      
+    
   }
   
   if (!is.null(infoProject)) {
     header          = infoProject$dataheader
-    observationName = infoProject$output
+    observationModelName = infoProject$fit$model
+    observationDataName = infoProject$fit$data
+    observationYtypeName = infoProject$fit$ytype
     datafile        = infoProject$datafile
   } 
   
@@ -156,7 +158,8 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
   
   catNames<-NULL
   headerTest =lixoft.read.table(file = datafile, comment.char = "", sep = delimiter, nrows = 1, stringsAsFactors = FALSE)
-  if(headerTest[1,1]=="#") {
+  headerTest[1,which(is.na(headerTest[1,]))] <- "ignore"
+  if(headerTest[1,1]=="#" ) {
     headerToUse<-headerTest[,-1]
     dataNoHeader    =  tryCatch(
       lixoft.read.table(file = datafile,comment.char = "#", sep=delimiter,stringsAsFactors=FALSE)
@@ -170,20 +173,35 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
     names(data)<- headerToUse
     
   } else {
-    data = tryCatch(
-      (if(!is.null(icat)) {
-        colCatType<-rep(NA,length(headerTest))
-        catNames <-headerTest[icat]
-        names(catNames)<-NULL
-        catNames<-trimws(unlist(catNames))
-        colCatType[icat]<-rep("character",length(icat))
-        lixoft.read.table(file = datafile, comment.char="", header = TRUE, sep=delimiter,colClasses = colCatType)
-      } else {
-        lixoft.read.table(file = datafile, comment.char="", header = TRUE, sep=delimiter)
-      }), error=function(e) {
+
+    istrCols = c()
+    
+    if (!is.null(iytype))
+      istrCols = append(istrCols, iytype)
+    
+    if (!is.null(icat)) {
+      
+      catNames <- headerTest[icat]
+      names(catNames) <- NULL
+      catNames <- trimws(unlist(catNames))
+      istrCols = append(istrCols, icat)
+      
+    }
+    
+    colClasses <- rep(NA, length(headerTest))
+    colClasses[istrCols] <- rep("character", length(istrCols))
+    
+    
+    data = tryCatch({ 
+      
+        lixoft.read.table(file = datafile, comment.char="", header = TRUE, sep=delimiter, colClasses = colClasses)
+      
+      } , error=function(e) {
+        
         error<-  geterrmessage()
-        message(paste0("WARNING: reading data using delimiter '",delimiter,"' failed: ", geterrmessage()))
-        return( lixoft.read.table(file = datafile, comment.char="", header = TRUE))
+        message(paste0("WARNING: reading data using delimiter '", delimiter, "' failed: ", geterrmessage()))
+        return( lixoft.read.table(file = datafile, comment.char = "", header = TRUE, colClasses = colClasses) )
+        
       }      
     )
   }
@@ -239,9 +257,9 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
       idObs <-NULL
       ytype <- factor(S[iobs1,iytype])
       l.ytype <- levels(ytype)
-      if (is.null(observationName))
-        observationName <- paste0("y",l.ytype)
-      n.y <- length(observationName)
+      if (is.null(observationModelName))
+        observationModelName <- paste0("y",l.ytype)
+      n.y <- length(observationModelName)
       for (in.y in (1:n.y)) 
         idObs <-c(idObs,as.character(S[iobs1[which(ytype==l.ytype[in.y])],iid]))
       idObs<-unique(idObs)
@@ -289,7 +307,7 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
   if (!is.null(icat)) {
     for (j in (1:length(icat))) {
       Scatj <- S[[icat[j]]]  
-#      Scatj <- gsub(" ", "", Scatj, fixed = TRUE)
+      #      Scatj <- gsub(" ", "", Scatj, fixed = TRUE)
       S[[icat[j]]] <- as.factor(Scatj)  
     }
   }
@@ -328,7 +346,12 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
       u=data.frame(idnum[i1], t[i1], si1dose)
     else
       u=cbind(list(idnum[i1], t[i1]), si1dose)
-    names(u) = c('id',newHeader[[itime]],newHeader[ixdose])
+    if (!is.null(itime))
+      names(u) = c('id',newHeader[[itime]],newHeader[ixdose])
+    else {
+      u <- u[-2]
+      names(u) = c('id',newHeader[ixdose])
+    }
     #
     u.addl <- NULL
     u.ss <- NULL
@@ -411,35 +434,33 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
     yvalues['limit'] <- S[iobs1,ilimit]
   if (!is.null(iytype)){ 
     ytype <- factor(S[iobs1,iytype])
-    l.ytype <- levels(ytype)
-    if (is.null(observationName))
-      observationName <- paste0("y",l.ytype)
-    n.y <- length(observationName)
-    # n.y <- length(l.ytype)
-    # if (length(observationName)<n.y)
-    #   observationName <- paste0("y",l.ytype)
+    if (!exists("observationYtypeName"))
+      observationYtypeName <- levels(ytype)
+    if (!exists("observationDataName"))
+      observationDataName <- paste0("y",observationYtypeName)
+    n.y <- length(observationDataName)
     y<- obsRows <- list()
     for (in.y in (1:n.y)) {
-      idObs.i <- which(ytype==l.ytype[in.y])
+      idObs.i <- which(ytype==observationYtypeName[in.y])
       y[[in.y]] <- yvalues[idObs.i,]
-      names(y[[in.y]])[3] <- observationName[in.y]
+      names(y[[in.y]])[3] <- observationDataName[in.y]
       attr(y[[in.y]],'type') <- "longitudinal"
       obsRows[[in.y]] <-  idObsRows[iobs1[idObs.i]]
     }
-    names(obsRows) <- observationName
-    #     yvalues$ytype <- observationName[S[[iytype]][iobs1]]
+    names(obsRows) <- observationDataName
+    #     yvalues$ytype <- observationModelName[S[[iytype]][iobs1]]
   } else {
     y <- yvalues
-    if (is.null(observationName))
-      observationName <- "y"
-    names(y)[3] <- observationName
+    if (!exists("observationDataName"))
+      observationDataName <- "y"
+    names(y)[3] <- observationDataName
     attr(y,'type') <- "longitudinal"
     y <- list(y)
     obsRows <- list(idObsRows[iobs1])
-    names(obsRows) <- observationName
+    names(obsRows) <- observationDataName
     
   }
-  names(y) <- observationName
+  names(y) <- observationDataName
   datas <- c(datas,y)
   # datas$observation = y
   
@@ -449,18 +470,14 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
   
   if (nx>0) {
     Sx <- S[ix]
-    Dx <- data.frame(id=idnum, time=t, Sx)
+    Sx[Sx=="."] <- NA
     ix.num <- which(!sapply(Sx,is.numeric))
     if (!is.null(ix.num)) {
-      jx <- NULL
       for (k in (ix.num)) {
-        jx <- c(jx, findstrcmp(Sx[[ix.num[k]]],'.'))
+        Sx[,ix.num[k]] <- as.numeric(as.character(Sx[,ix.num[k]])) 
       }
-      # if (!is.null(jx))
-      #   Dx <- Dx[-jx,]
-      # for (k in (ix.num))
-      #   Dx[[k+2]] <- as.numeric(as.character(Dx[[k+2]]))        
     }
+    Dx <- data.frame(id=idnum, time=t, Sx)
     datas$regressor <- subset(Dx, !duplicated(cbind(id,time)))
   }
   
@@ -486,7 +503,10 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
     if (!is.null(u.evid)) 
       ov.io <- u.evid
     if (!is.null(ov.io)) {
-      ov.id <- ov.io[,1]
+      if (is.null(nrow(ov.io)))
+        ov.id <- ov.io[1]
+      else
+        ov.id <- ov.io[1]
       occ <- rep(1,length(ov.id))
       if (length(ov.id)>=2) {
         for (i in (2:length(ov.id))) {
@@ -513,6 +533,17 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
   
   cdf <- cdf.iov <- NULL
   nc = length(icov) + length(icat)
+  for (j in seq_len(length(icat))) {
+    icatj <- icat[j]
+    if ("." %in% levels(S[[icatj]]))
+      levels(S[[icatj]])[levels(S[[icatj]])=="."] <- "NA"
+    if (sum(is.na(S[[icatj]]))>0) {
+      if (!("NA" %in% levels(S[[icatj]])))
+        levels(S[[icatj]]) <- c(levels(S[[icatj]]), "NA")
+      S[[icatj]][is.na(S[[icatj]])] <- "NA"
+    }
+  }
+  
   if (nc>0) {
     ic <- c(icov,icat)
     cdf <- data.frame(id=iduf)
@@ -572,3 +603,5 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
   }
   return(datas)
 }
+
+
