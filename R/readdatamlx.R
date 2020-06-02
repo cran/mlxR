@@ -12,6 +12,7 @@
 #' @param out.data TRUE/FALSE (default=FALSE) returns the original data as a table and some information about the Monolix project  
 #' @param nbSSDoses number of additional doses to use for steady-state (default=10) 
 #' @param obs.rows a list of observation indexes 
+#' @param error.iov TRUE/FALSE (default=TRUE) returns an error message if occasions are overlapping  
 #' @param datafile (deprecated) a formatted data file 
 #' @param header (deprecated) a vector of strings  
 #' @param infoProject (deprecated) an xmlfile 
@@ -36,7 +37,7 @@
 #' @importFrom tools file_path_sans_ext
 #' @export
 readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10, obs.rows=FALSE,
-                         datafile=NULL, header=NULL, infoProject=NULL, addl.ss=NULL){
+                         datafile=NULL, header=NULL, infoProject=NULL, addl.ss=NULL, error.iov=TRUE){
   id <- NULL
   observationModelName <- NULL
   datas=NULL
@@ -173,7 +174,7 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
     names(data)<- headerToUse
     
   } else {
-
+    
     istrCols = c()
     
     if (!is.null(iytype))
@@ -194,15 +195,15 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
     
     data = tryCatch({ 
       
-        lixoft.read.table(file = datafile, comment.char="", header = TRUE, sep=delimiter, colClasses = colClasses)
+      lixoft.read.table(file = datafile, comment.char="", header = TRUE, sep=delimiter, colClasses = colClasses)
       
-      } , error=function(e) {
-        
-        error<-  geterrmessage()
-        message(paste0("WARNING: reading data using delimiter '", delimiter, "' failed: ", geterrmessage()))
-        return( lixoft.read.table(file = datafile, comment.char = "", header = TRUE, colClasses = colClasses) )
-        
-      }      
+    } , error=function(e) {
+      
+      error<-  geterrmessage()
+      message(paste0("WARNING: reading data using delimiter '", delimiter, "' failed: ", geterrmessage()))
+      return( lixoft.read.table(file = datafile, comment.char = "", header = TRUE, colClasses = colClasses) )
+      
+    }      
     )
   }
   
@@ -317,8 +318,9 @@ readDatamlx  <- function(project=NULL, data = NULL, out.data=FALSE, nbSSDoses=10
     socc['time'] <- socc[names(S)[itime]]
     socc1 <- socc[with(socc, order(id, time,occ)), 1:3 ]
     socc2 <- socc[with(socc, order(id,occ, time)), 1:3 ]
-    if (!identical(socc1,socc2))
-      stop("Overlapping occasions are not handled by Simulx", call.=FALSE)
+    if (!identical(socc1,socc2) & error.iov==TRUE)
+    stop("Overlapping occasions are not handled by Simulx", call.=FALSE)
+    #  return(list(error="Overlapping occasions are not handled by Simulx"))
     #stop("Only occasions within a same period of time are supported", call.=FALSE)
   }
   ##************************************************************************
