@@ -87,9 +87,11 @@ translateIOV <- function(model, occ.name, nocc, output, iov0, cat0=NULL) {
       sec.long <- splitSection(sm[[i.long]])
       u.iov <- unique(c(i.iov,o.iov))
       long.lines <- iovinlong(sec.long$input, v.iov, u.iov, nocc, sec.long$name, occ.name)
-      r1.long <- iovseclong(sec.long, v.iov, d.iov, u.iov, nocc, occ.name)
-      #    var.iov <- unique(c(var.iov, r0.long$iov))
-      lines <- c(lines,"",long.lines,r1.long$lines)
+      if (length(v.iov)==length(d.iov)) {
+        r1.long <- iovseclong(sec.long, v.iov, d.iov, u.iov, nocc, occ.name)
+        #    var.iov <- unique(c(var.iov, r0.long$iov))
+        lines <- c(lines,"",long.lines,r1.long$lines)
+      }
     } else {
       lines <- c(lines,"",sm[[i.long]]$lines)
     }
@@ -216,6 +218,18 @@ strmerge <- function(str1, op=0) {
     str2 <- c(str2, si)
   }
   
+  list1 <- NULL
+  for (idx in (1:length(str2))) {
+    si <- str2[idx]
+    if (identical(substr(si,nchar(si),nchar(si)),"="))
+      list1 <- c(list1, idx)
+  }
+  if (length(list1)>0) {
+    for (idx in list1)
+      str2[idx] <- paste0(str2[idx],str2[idx+1])
+    str2 <- str2[-(list1+1)]
+  }
+  
   if (op==1) {
     n <- length(str2)
     str3 <- c()
@@ -249,6 +263,10 @@ splitSection  <-  function(section) {
   i.pk   = grep("PK:",lines, fixed=TRUE)
   is <- sort(c(i.pk,i.eq,i.def))
   is <- c(is, length(lines)+1)
+  if (!is.na(i.input))
+    input <- lines[i.input:(is[1]-1)]
+  else
+    input <- NULL
   bt <- c()
   bc <- list()
   if (length(is)>1) {
@@ -265,12 +283,11 @@ splitSection  <-  function(section) {
         bc[[k]] <- ""
     }
   }
-  return(list(name=section$name, input=lines[i.input:(is[1]-1)], blocks=bt, lines=bc))
+  return(list(name=section$name, input=input, blocks=bt, lines=bc))
 }
 
 iovin <- function(lines, c.iov=NULL, v.iov=NULL, nocc, name, cat=NULL, rem.name=NULL) {
   # duplicates the list of variables with IOV in the input list
-  
   
   if (!is.null(rem.name)) {
     vc <- sub("\\=.*","",lines)
@@ -296,6 +313,10 @@ iovin <- function(lines, c.iov=NULL, v.iov=NULL, nocc, name, cat=NULL, rem.name=
   suffix <- "_iov"
   sep <- "([\\,\\{\\}])"
   vi <- c()
+  
+  for (expr in v.iov)
+    if (length(grep(expr, lines))==0)
+      rem.name <- c(rem.name, expr)
   v.iov <- setdiff(v.iov,rem.name)
   
   l.input <- grep("input", lines)
@@ -463,7 +484,7 @@ iovdef <- function(lines, v.iov=NULL, nocc) {
   lines <- gsub(",mean=",",reference=",lines)
   lines <- gsub(",prediction=",",reference=",lines)
   lines <- gsub(",typical=",",reference=",lines)
-  iop.sd <- (length(grep("sd=",lines))>0) 
+  iop.sd <- (length(grep("var=",lines))==0) 
   fields <- line2field(lines)
   if (length(lines)==1) fields <- list(fields)
   
